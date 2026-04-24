@@ -54,6 +54,7 @@ description: >
 | Authoring Scope                                 | [SKILL.md § Authoring Scope](#authoring-scope)                                                                               | Supported operations at a glance                                  |
 | Authoring Mechanics (full reference)            | [authoring-mechanics.md](references/authoring-mechanics.md)                                                                  | Envelope, IDs, create, entity types, bindings, relationships, update, verify |
 | Worked Examples                                 | [examples.md](references/examples.md)                                                                                        | End-to-end bash recipes (create → bind → relationship → timeseries) |
+| Preview & Confirm (mandatory before LRO write)  | [preview-and-confirm.md](references/preview-and-confirm.md)                                                                  | Mermaid proposal (greenfield) / change-set diff (brownfield)       |
 | Script Templates                                | [definition-script-templates.md](references/definition-script-templates.md)                                                  | Bash / PowerShell / Python fetch-mutate-send scaffolds             |
 | Must / Prefer / Avoid / Troubleshooting         | [SKILL.md § Must / Prefer / Avoid / Troubleshooting](#must--prefer--avoid--troubleshooting)                                  | LLM decision rules                                                 |
 | Agentic Workflows                               | [SKILL.md § Agentic Workflows](#agentic-workflows)                                                                           | Exploration-before-authoring, script generation                    |
@@ -227,6 +228,7 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 - **Restrict entity keys (`entityIdParts`) to properties whose `valueType` is `String` or `BigInt`** — other value types cannot be used as keys.
 - **Verify permissions** — authoring requires at least `Contributor` on the workspace.
 - **Treat the item type as `Ontology`** (not `OntologyPreview` or similar) in both the envelope's `type` and the `.platform` metadata.
+- **Render a Preview & Confirm gate before every LRO write** — render a Mermaid proposal (greenfield) or a change-set diff vs. `getDefinition` (brownfield) and obtain explicit `yes` from the user before calling `createItem` or `updateDefinition`. See [preview-and-confirm.md](references/preview-and-confirm.md). Anything other than `yes` means stop and revise; never partially apply.
 
 ### Prefer
 
@@ -293,8 +295,11 @@ Step 5 → For each relationship:
            c. Build RelationshipTypes/{id}/definition.json
            d. Build RelationshipTypes/{id}/Contextualizations/{guid}.json
 Step 6 → Base64-encode all parts; assemble envelope
-Step 7 → createItem OR updateDefinition (LRO)
-Step 8 → Poll LRO until Succeeded; getDefinition; verify IDs and bindings
+Step 7 → **PREVIEW & CONFIRM** — render proposal (greenfield) or change-set diff (brownfield)
+         and obtain explicit `yes` from the user. See [preview-and-confirm.md](references/preview-and-confirm.md).
+         Do not proceed on anything other than `yes`.
+Step 8 → createItem OR updateDefinition (LRO)
+Step 9 → Poll LRO until Succeeded; getDefinition; verify IDs and bindings; persist post-write snapshot for next-run diff
 ```
 
 ### Script Generation Workflow
@@ -303,7 +308,9 @@ Step 8 → Poll LRO until Succeeded; getDefinition; verify IDs and bindings
 Step 1 → Capture user intent (entity types, keys, properties, relationships, source tables)
 Step 2 → Save intent as a YAML/JSON spec in the consumer's repo — single source of truth
 Step 3 → Generate: (a) the ID map, (b) per-file JSON parts, (c) the composite envelope
-Step 4 → Review diff against last-applied envelope (stored alongside the spec)
+Step 4 → **PREVIEW & CONFIRM** — render proposal/diff and require explicit `yes`
+         (see [preview-and-confirm.md](references/preview-and-confirm.md)). The textual
+         diff against the last-applied envelope snapshot feeds the brownfield change-set.
 Step 5 → Apply via az rest --body @envelope.json (createItem or updateDefinition)
 Step 6 → Poll LRO; on success, commit the envelope snapshot + ID map
 ```
