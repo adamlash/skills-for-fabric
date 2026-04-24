@@ -8,7 +8,7 @@
   
   Or commit your changes - the pre-commit hook will regenerate this file.
   
-  Last generated: 2026-03-09 04:36 UTC
+  Last generated: 2026-04-24 21:38 UTC
 -->
 
 # Skill Catalog
@@ -30,6 +30,8 @@ This catalog lists all available skills-for-fabric with their purpose and trigge
 | [e2e-medallion-architecture](#e2e-medallion-architecture) | End-to-End | Implement end-to-end Medallion Architecture (Bronze/Silver/G... |
 | [eventhouse-authoring-cli](#eventhouse-authoring-cli) | Authoring | Execute KQL management commands (table management, ingestion... |
 | [eventhouse-consumption-cli](#eventhouse-consumption-cli) | Consumption | Run KQL queries against Fabric Eventhouse for real-time inte... |
+| [ontology-authoring-cli](#ontology-authoring-cli) | Authoring | Create and evolve Fabric IQ Ontology (preview) items from CL... |
+| [ontology-consumption-cli](#ontology-consumption-cli) | Consumption | Read Fabric IQ Ontology (preview) items from CLI to produce ... |
 | [powerbi-authoring-cli](#powerbi-authoring-cli) | Authoring | Create, manage, and deploy Power BI semantic models inside M... |
 | [powerbi-consumption-cli](#powerbi-consumption-cli) | Consumption | The ONLY supported path for read-only Microsoft Fabric Power... |
 | [spark-authoring-cli](#spark-authoring-cli) | Authoring | Develop Microsoft Fabric Spark/data engineering workflows wi... |
@@ -76,6 +78,26 @@ This catalog lists all available skills-for-fabric with their purpose and trigge
 **Purpose:** Run KQL queries against Fabric Eventhouse for real-time intelligence and time-series analytics using `az rest` against the Kusto REST API. Covers KQL operators (where, summarize, join, render), Eventhouse schema discovery (.show tables), time-series patterns with bin(), and ingestion monitoring.
 
 **Location:** `skills/eventhouse-consumption-cli/`
+
+---
+
+## ontology-authoring-cli
+
+**Type:** Authoring
+
+**Purpose:** Create and evolve Fabric IQ Ontology (preview) items from CLI — define entity types, properties (including timeseries), relationship types, and bind them to OneLake lakehouse tables (static + timeseries) or Eventhouse / KQL database tables (timeseries only). Uses the Fabric item-definition REST API (Create Item / Update Item Definition) with `InlineBase64` parts.
+
+**Location:** `skills/ontology-authoring-cli/`
+
+---
+
+## ontology-consumption-cli
+
+**Type:** Consumption
+
+**Purpose:** Read Fabric IQ Ontology (preview) items from CLI to produce agent grounding context — enumerate entity types, properties (including timeseries), relationships, and data bindings — then route data queries by binding type to the matching per-datasource consumption skill (`eventhouse-consumption-cli`, `spark-consumption-cli`, `sqldw-consumption-cli`). Uses the Fabric item-definition REST API (Get Item Definition) with `InlineBase64` parts.
+
+**Location:** `skills/ontology-consumption-cli/`
 
 ---
 
@@ -145,8 +167,8 @@ This catalog lists all available skills-for-fabric with their purpose and trigge
 
 | Type | Skills |
 |------|--------|
-| Authoring | eventhouse-authoring-cli, powerbi-authoring-cli, spark-authoring-cli, sqldw-authoring-cli |
-| Consumption | eventhouse-consumption-cli, powerbi-consumption-cli, spark-consumption-cli, sqldw-consumption-cli |
+| Authoring | eventhouse-authoring-cli, ontology-authoring-cli, powerbi-authoring-cli, spark-authoring-cli, sqldw-authoring-cli |
+| Consumption | eventhouse-consumption-cli, ontology-consumption-cli, powerbi-consumption-cli, spark-consumption-cli, sqldw-consumption-cli |
 | End-to-End | e2e-medallion-architecture |
 | Utility | check-updates |
 

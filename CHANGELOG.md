@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- New `skills/ontology-authoring-cli/` — Author Fabric IQ Ontology (preview) items via `az rest`: create the ontology item, add entity types (with key / display-name / timeseries properties), bind entity types to OneLake lakehouse and Eventhouse (KustoTable, TimeSeries-only) tables, add relationship types between entity types, and bind relationships via contextualizations. Includes `references/definition-script-templates.md` with Bash, PowerShell, and Python scaffolds for the fetch-mutate-send `updateDefinition` flow (handles `getDefinition` 200/202 LRO responses).
+- New `common/ONTOLOGY-AUTHORING-CORE.md` — Fabric IQ Ontology (preview) authoring reference: definition tree, EntityType / EntityTypeProperty / DataBinding / RelationshipType / Contextualization schemas, Lakehouse ↔ Eventhouse source-type / `valueType` mapping, binding constraints (managed tables, no OneLake security, no column mapping, single static binding per entity type, keys limited to `String`/`BigInt`), and manual refresh requirement.
 - New `skills/eventhouse-consumption-cli/` — Read-only KQL queries against Fabric Eventhouse and KQL Databases via `az rest`
 - New `skills/eventhouse-authoring-cli/` — KQL management commands (table management, ingestion, policies, materialized views, functions) via `az rest`
 - New `common/EVENTHOUSE-CONSUMPTION-CORE.md` — KQL query patterns, operators, data types, performance best practices

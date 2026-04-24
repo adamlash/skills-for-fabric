@@ -23,6 +23,7 @@
         "./skills/spark-authoring-cli",
         "./skills/eventhouse-consumption-cli",
         "./skills/eventhouse-authoring-cli",
+        "./skills/ontology-authoring-cli",
         "./skills/e2e-medallion-architecture"
       ],
       "agents": [
@@ -53,6 +54,7 @@
         "./skills/sqldw-authoring-cli",
         "./skills/spark-authoring-cli",
         "./skills/eventhouse-authoring-cli",
+        "./skills/ontology-authoring-cli",
         "./skills/e2e-medallion-architecture"
       ],
       "agents": [

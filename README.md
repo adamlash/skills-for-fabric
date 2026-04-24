@@ -174,6 +174,7 @@ No secrets or tokens are stored by the skills.
 | sqldw-authoring-cli | Author Warehouses, Lakehouse SQL Endpoints, Mirrored Databases |
 | spark-authoring-cli | Build Fabric Spark and Data Engineering workflows |
 | eventhouse-authoring-cli | Manage KQL tables, ingestion, policies, and functions |
+| ontology-authoring-cli | Author Fabric IQ Ontology items — entity types, bindings, relationships |
 | powerbi-authoring-cli | Create and deploy Power BI semantic models |
 
 ---
