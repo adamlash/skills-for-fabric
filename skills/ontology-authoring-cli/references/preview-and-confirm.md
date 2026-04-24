@@ -2,155 +2,201 @@
 
 > Before invoking `createItem` or `updateDefinition` (the LRO write), the agent **must** render a preview of what's about to be authored and obtain explicit user confirmation. This prevents schema drift, accidental property type changes, and unintended drops of bindings/relationships.
 
-There are two modes:
+Two modes:
 
-- **Greenfield** (creating a new ontology, or adding entity/relationship types from scratch) → render a **proposal diagram** showing the planned shape.
-- **Brownfield** (updating an existing ontology) → render a **change set** showing added / removed / modified parts vs. the current `getDefinition` snapshot.
+- **Greenfield** — creating a new ontology, or composing one from scratch → render a **proposal**.
+- **Brownfield** — updating an existing ontology → render a **change set** vs. the `getDefinition` snapshot.
 
-Both modes are CLI-friendly: Mermaid for the diagram, plus a plain-text "Affected Parts" table that renders in any chat surface.
-
----
-
-## 1. Greenfield: proposal diagram
-
-After Step 6 of the authoring workflow (envelope assembled in memory), but **before** Step 7 (LRO write), emit:
-
-### 1a. Header summary
-
-```text
-Proposed ontology:  ZavaAirlinesOntology  (in workspace WS_ID, folder FOLDER_ID)
-Entity types:       2  (Hub, Aircraft)
-Relationship types: 1  (operates: Hub → Aircraft)
-Data bindings:      3  (Hub→LH:hubs, Aircraft→LH:aircrafts, Aircraft→EH:AircraftReadings)
-Contextualizations: 1  (operates ↔ LH:hub_aircraft_link)
-```
-
-### 1b. Mermaid ER diagram
-
-```mermaid
-erDiagram
-    HUB {
-        string HubId PK
-        string HubName
-        string City
-    }
-    AIRCRAFT {
-        string TailNumber PK
-        string Manufacturer
-        datetime ObservedAt "TS"
-        double AltitudeFt "TS"
-    }
-    HUB ||--o{ AIRCRAFT : operates
-```
-
-**Conventions for the diagram:**
-
-- One Mermaid block per ontology.
-- Each entity type is one `erDiagram` block; key properties get `PK`. `displayNamePropertyId` does not get its own marker (call it out in the header summary if helpful).
-- Timeseries properties get the trailing comment `"TS"` so reviewers can see static-vs-timeseries at a glance.
-- Relationships render as `||--o{` (one-to-many) by default. If the contextualization link table is composite, add a label `"<rel name> [composite]"`.
-
-### 1c. Affected parts table
-
-```text
-| Action | Path                                                               | Why            |
-|--------|--------------------------------------------------------------------|----------------|
-| ADD    | .platform                                                          | metadata       |
-| ADD    | definition.json                                                    | empty envelope |
-| ADD    | EntityTypes/<HUB_ET_ID>/definition.json                            | Hub entity     |
-| ADD    | EntityTypes/<HUB_ET_ID>/DataBindings/<guid>.json                   | LH binding     |
-| ADD    | EntityTypes/<AIRCRAFT_ET_ID>/definition.json                       | Aircraft       |
-| ADD    | EntityTypes/<AIRCRAFT_ET_ID>/DataBindings/<guid>.json              | LH static      |
-| ADD    | EntityTypes/<AIRCRAFT_ET_ID>/DataBindings/<guid>.json              | EH timeseries  |
-| ADD    | RelationshipTypes/<OPERATES_REL_ID>/definition.json                | operates       |
-| ADD    | RelationshipTypes/<OPERATES_REL_ID>/Contextualizations/<guid>.json | LH link table  |
-```
-
-### 1d. Confirmation prompt
-
-End the preview with **one** of these prompts (do not auto-continue):
-
-> "Confirm this design and proceed with `createItem`? (yes / edit / cancel)"
-
-If the user says `edit`, loop back to Step 1 with their changes; do **not** partially apply.
+Both modes use the same emoji scheme and the same three layout tiers. ASCII boxes + emojis (no Mermaid, no ANSI) so the preview renders identically in any terminal, chat surface, or notebook.
 
 ---
 
-## 2. Brownfield: change-set diff
+## 1. Emoji legend (use these consistently)
 
-If the ontology already exists, fetch its current state with `getDefinition` (Step 3 of the workflow) **before** building the proposed envelope. Compare the two and emit:
-
-### 2a. Header summary
-
-```text
-Updating ontology: ZavaAirlinesOntology (ONTO_ID=...)
-  + 1 entity type added       (Gate)
-  ~ 1 entity type modified    (Aircraft: +1 timeseries property)
-  - 0 entity types removed
-  + 1 relationship added      (departsFrom: Aircraft → Gate)
-  ~ 0 relationships modified
-  - 0 relationships removed
-```
-
-### 2b. Mermaid diagram with change markers
-
-Render the **post-update** diagram, but annotate changed elements with a comment suffix:
-
-```mermaid
-erDiagram
-    HUB {
-        string HubId PK
-    }
-    AIRCRAFT {
-        string TailNumber PK
-        double AltitudeFt "TS"
-        double GroundSpeedKts "TS [+ added]"
-    }
-    GATE {
-        string GateId PK
-    }
-    HUB ||--o{ AIRCRAFT : operates
-    AIRCRAFT ||--o{ GATE : "departsFrom [+ added]"
-```
-
-Suffix convention:
-
-- `[+ added]`   — new property / binding / entity / relationship
-- `[~ modified]` — existing element whose definition changed (e.g., property valueType, binding sourceTable)
-- `[- removed]`  — element being deleted
-
-### 2c. Affected parts table (with action column)
-
-```text
-| Action | Path                                                                            | Diff                                  |
-|--------|---------------------------------------------------------------------------------|---------------------------------------|
-| ADD    | EntityTypes/<GATE_ET_ID>/definition.json                                        | new entity type Gate                  |
-| ADD    | EntityTypes/<GATE_ET_ID>/DataBindings/<guid>.json                               | LH binding to dbo.gates               |
-| MOD    | EntityTypes/<AIRCRAFT_ET_ID>/definition.json                                    | + timeseriesProperties[GroundSpeedKts]|
-| MOD    | EntityTypes/<AIRCRAFT_ET_ID>/DataBindings/<existing-eh-guid>.json               | + propertyBindings[gnd_spd_kts]       |
-| ADD    | RelationshipTypes/<DEPARTS_REL_ID>/definition.json                              | new relationship                      |
-| ADD    | RelationshipTypes/<DEPARTS_REL_ID>/Contextualizations/<guid>.json               | LH link table                         |
-| KEEP   | EntityTypes/<HUB_ET_ID>/...                                                     | unchanged (carried forward in envelope)|
-```
-
-`KEEP` rows are **not optional** to surface — `updateDefinition` replaces the entire `parts[]`, so any part that should survive must be re-included in the envelope. Use this column to assure the user that nothing they expect to keep is being silently dropped.
-
-### 2d. Risky-change callouts
-
-Before the confirmation prompt, surface these **explicitly** if any apply:
-
-- **Property `valueType` changed** (e.g., `String` → `BigInt`) — data already loaded against the old type may fail to parse.
-- **Entity `entityIdParts` changed** — break-change; downstream consumers will not match identities across the boundary.
-- **Binding `sourceTableName` / `sourceSchema` changed** — bindings now point at a different table; verify intent.
-- **Removal** of any entity type, relationship type, or binding — confirm explicitly; deletes are not auto-recoverable.
-
-### 2e. Confirmation prompt
-
-> "Confirm and apply this change set with `updateDefinition`? (yes / edit / cancel)"
+| Emoji | Meaning            | Emoji | Meaning           |
+| ----- | ------------------ | ----- | ----------------- |
+| 🏢    | entity type        | ➕    | ADD (new)         |
+| 🔑    | key / PK           | 🔧    | MOD (changed)     |
+| 📈    | timeseries property| ➖    | DEL (removed)     |
+| 🔗    | relationship       | ✅    | KEEP (unchanged)  |
+| 🏬    | lakehouse source   | ⚠️    | risky change      |
+| ⚡    | eventhouse source  | 📁    | group / folder    |
 
 ---
 
-## 3. How to compute the diff
+## 2. Tier selection (auto)
+
+Pick the tier by **post-update entity count** (so a brownfield update with 4 existing + 26 new → Tier 3):
+
+| Entities | Tier   | Layout                                                                  |
+| -------- | ------ | ----------------------------------------------------------------------- |
+| ≤ 5      | Tier 1 | ASCII boxes per entity + relationships rendered between boxes           |
+| 6–15     | Tier 2 | Entity inventory table + adjacency-list relationships                   |
+| 16+      | Tier 3 | Group summary + paginated inventory + adjacency list; details on demand |
+
+---
+
+## 3. Tier 1 — ≤ 5 entities (boxes)
+
+```text
+📁 Workspace : <ws-name>     Folder : <folder-name>
+📊 Entities  : 2             🔗 Relations : 1            📌 Bindings : 3 (1 📈)
+
+   ┌───────────────────────────┐                       ┌─────────────────────────────────┐
+   │ 🏢 HUB                    │                       │ 🏢 AIRCRAFT                     │
+   ├───────────────────────────┤                       ├─────────────────────────────────┤
+   │ 🔑 HubId         string   │     🔗 operates       │ 🔑 TailNumber       string      │
+   │    HubName       string   │   1 ───────────► *    │    Manufacturer     string      │
+   │    City          string   │                       │ 📈 ObservedAt       datetime    │
+   │                           │                       │ 📈 AltitudeFt       double      │
+   │                           │                       │ 📈 GroundSpeedKts   double      │
+   └───────────────────────────┘                       └─────────────────────────────────┘
+   🏬 LH dbo.hubs                                      🏬 LH dbo.aircrafts (static)
+                                                       ⚡ EH AircraftReadings (TS, ts=ObservedAt)
+
+   🔗 operates  ➜  🏬 LH dbo.hub_aircraft_link
+       hub_id       →  Hub.HubId
+       tail_number  →  Aircraft.TailNumber
+```
+
+**Box conventions:**
+
+- One box per entity. Title = `🏢 <NAME>` in caps.
+- Properties listed inside, one per line: `<emoji> <name>   <type>` aligned in two columns.
+- `🔑` only on key properties (`entityIdParts`); `📈` only on timeseries properties.
+- Below the box: `🏬 LH …` static binding line, then `⚡ EH …` timeseries binding line if present.
+- Relationships: render between the two boxes when space permits. Otherwise list below all boxes:
+  `🔗 <name>  ➜  🏬 LH <link-table>` then 2-space-indented key mappings.
+
+---
+
+## 4. Tier 2 — 6–15 entities (inventory + adjacency)
+
+```text
+🏢 ENTITY INVENTORY  (8 of 8)
+
+   #  Entity         Key                Props  TS   Static binding         Timeseries binding
+   ─  ─────────────  ─────────────────  ─────  ──   ─────────────────────  ────────────────────────
+   1  Hub            🔑 HubId            4      —   🏬 dbo.hubs            —
+   2  Aircraft       🔑 TailNumber       6      📈  🏬 dbo.aircrafts       ⚡ AircraftReadings
+   3  Gate           🔑 GateId           3      —   🏬 dbo.gates           —
+   4  Flight         🔑 FlightId         9      📈  🏬 dbo.flights         ⚡ FlightTelemetry
+   5  Crew           🔑 CrewId           5      —   🏬 dbo.crew            —
+   6  Passenger      🔑 PassengerId      7      —   🏬 dbo.passengers      —
+   7  Booking        🔑 BookingId        6      —   🏬 dbo.bookings        —
+   8  Maintenance    🔑 WorkOrderId      5      📈  🏬 dbo.maint_orders    ⚡ MaintEvents
+
+🔗 RELATIONSHIPS (6)
+   Hub        ─[ operates    ]─►  Aircraft        🏬 dbo.hub_aircraft_link
+   Aircraft   ─[ flies       ]─►  Flight          🏬 dbo.aircraft_flight_link
+   Flight     ─[ departsFrom ]─►  Gate            🏬 dbo.flight_gate_link
+   Flight     ─[ staffedBy   ]─►  Crew            🏬 dbo.flight_crew_link
+   Passenger  ─[ bookedOn    ]─►  Booking         🏬 dbo.passenger_booking_link
+   Maint      ─[ scheduledFor]─►  Aircraft        🏬 dbo.maint_aircraft_link
+```
+
+**Conventions:** prompt user with `show <name>` for full per-entity property list when they want it. Don't print property dumps for every entity at this tier — keeps the preview readable.
+
+---
+
+## 5. Tier 3 — 16+ entities (grouped, paginated, status-coded)
+
+```text
+📁 GROUPS
+   Operations (8)   Customer (6)   Crew (5)   Maintenance (7)   Finance (4)   →  30 entities
+
+🏢 INVENTORY  (showing 1–6 of 30 — "next" / "show <name>")
+
+   S   #  Entity        Group        Key                Props  TS   Bindings
+   ──  ─  ────────────  ───────────  ─────────────────  ─────  ──   ───────────────────────────────────
+   ➕   9  Gate          Operations   🔑 GateId           3      —    🏬 dbo.gates                              (new)
+   🔧   2  Aircraft      Operations   🔑 TailNumber       6      📈   🏬 dbo.aircrafts | ⚡ AircraftReadings    (+1 📈 prop)
+   ✅   1  Hub           Operations   🔑 HubId            4      —    🏬 dbo.hubs                               (unchanged)
+   ➖   4  Sector        Operations   🔑 SectorId         5      —    🏬 dbo.sectors                            (REMOVED)
+   ➕  11  Part          Maintenance  🔑 PartNumber       4      —    🏬 dbo.parts                              (new)
+   ➕  12  PartUsage     Maintenance  🔑 UsageId          5      📈   🏬 dbo.part_usage | ⚡ PartEvents          (new)
+```
+
+**Conventions:**
+
+- The `S` (status) column is mandatory in brownfield previews and optional in greenfield (everything is `➕` so the column degenerates). For consistency, keep it in greenfield Tier 3 too.
+- Group label comes from a user-supplied `group:` annotation in the spec, or from the entity's `namespace`. If neither is present, default group is `_ungrouped`.
+- Pagination accepts `next`, `prev`, `page <n>`, `show <name>`, `all`.
+- `all` may produce a very long output — warn the user before printing if `count > 50`.
+
+---
+
+## 6. Brownfield change-set (any tier)
+
+The same diagram is rendered from the **proposed** tree, but every row carries a status emoji from the diff vs. `getDefinition`:
+
+| Status | Meaning |
+| ------ | ---------------------------------------------------------- |
+| ➕     | added (new in this update)                                 |
+| 🔧     | modified (existing element with changed definition)        |
+| ✅     | kept (unchanged, but still in the envelope — see warning)  |
+| ➖     | removed (will be deleted by this update)                   |
+
+**`✅` rows are mandatory.** `updateDefinition` replaces the entire `parts[]` — anything not re-included in the envelope is dropped. Rendering `✅` rows reassures the user nothing is being silently removed.
+
+### Per-property change rendering (Tier 1 box mode)
+
+Inside an entity box, annotate the changed line directly:
+
+```text
+   │ 🔑 TailNumber       string                │
+   │    Manufacturer     string                │
+   │ 📈 ObservedAt       datetime              │
+   │ 📈 AltitudeFt       double      🔧 was String  │
+   │ 📈 GroundSpeedKts   double      ➕ added       │
+```
+
+### Risky-change callouts
+
+Print the `⚠️ RISKY CHANGES` block **before** the affected-parts table, regardless of tier:
+
+```text
+⚠️  RISKY CHANGES
+   🔧  valueType change   Aircraft.AltitudeFt   String → Double   (existing rows may fail to parse)
+   🔧  key change         Aircraft.entityIdParts  TailNumber → AircraftId   (break-change for downstream)
+   🔧  source change      Hub binding             dbo.hubs → dbo.hubs_v2    (verify intent)
+   ➖  removal            Sector entity + 1 binding + 1 relationship   (confirm explicitly)
+```
+
+If **no** risky changes are detected, omit the section entirely (don't print "⚠️ RISKY CHANGES — none").
+
+---
+
+## 7. Affected parts list (always print)
+
+After the diagram(s) and risky callouts, print a flat action list. One row per definition file, prefixed with status emoji:
+
+```text
+➕  .platform                                                          # displayName=ZavaAirlines_PreviewDemo
+➕  definition.json
+➕  EntityTypes/<HUB_ET>/definition.json
+➕  EntityTypes/<HUB_ET>/DataBindings/<guid>.json                      # 🏬 LH dbo.hubs
+🔧  EntityTypes/<AIRCRAFT_ET>/DataBindings/<existing-eh-guid>.json     # ⚡ EH AircraftReadings  +propertyBindings[GroundSpeedKts]
+✅  EntityTypes/<HUB_ET>/DataBindings/<existing-guid>.json             # 🏬 LH dbo.hubs (carried forward)
+➖  EntityTypes/<SECTOR_ET>/...                                        # entire entity tree
+```
+
+In greenfield mode this collapses to all `➕`. In brownfield mode every part in the proposed envelope shows up here with its diff status.
+
+---
+
+## 8. Confirmation prompt (mandatory)
+
+End the preview with **exactly one** of these single-line prompts:
+
+- Greenfield: `Confirm and proceed with createItem? (yes / edit / cancel)`
+- Brownfield: `Confirm and apply this change set with updateDefinition? (yes / edit / cancel)`
+
+Do not auto-continue. Treat anything other than literal `yes` as `edit` (loop back to intent gathering) or `cancel` (discard envelope).
+
+---
+
+## 9. How to compute the diff
 
 ```bash
 # Step A — fetch current state (after Step 3 of the workflow)
@@ -159,7 +205,7 @@ az rest --method POST \
   --resource "https://api.fabric.microsoft.com" -o json > /tmp/onto.current.json
 # (poll Location, then GET .../result — see COMMON-CLI.md § LRO)
 
-# Step B — decode parts to a directory tree for cmp
+# Step B — decode parts to a directory tree
 mkdir -p /tmp/onto.current.tree
 jq -r '.definition.parts[] | "\(.path)\t\(.payload)"' /tmp/onto.current.json |
 while IFS=$'\t' read -r path b64; do
@@ -167,29 +213,29 @@ while IFS=$'\t' read -r path b64; do
   printf '%s' "$b64" | base64 -d > "/tmp/onto.current.tree/$path"
 done
 
-# Step C — do the same for the proposed envelope before sending
-# (the agent already has the parts in memory; dump them under /tmp/onto.proposed.tree)
+# Step C — do the same for the proposed envelope (the agent already has it in memory)
+# dump it under /tmp/onto.proposed.tree
 
 # Step D — diff
 diff -ruN /tmp/onto.current.tree /tmp/onto.proposed.tree
 ```
 
-The agent should parse this diff (or the in-memory equivalent) into the ADD / MOD / KEEP / DEL rows shown in §2c. The Mermaid output in §2b is generated from the **proposed** tree; the change suffixes come from the diff.
+The agent parses this diff (or the in-memory equivalent) into the `➕ / 🔧 / ✅ / ➖` rows. Tier-3 status detection is at the part-level granularity (one entity's `definition.json` → one `🔧` if any field changed; bindings are tracked per-binding).
 
 ---
 
-## 4. Agent contract
+## 10. Agent contract
 
 A skill consumer agent **must**:
 
-1. Always render the preview in §1 (greenfield) or §2 (brownfield) before any LRO write.
-2. Wait for an explicit `yes` from the user. Treat anything else as `edit` or `cancel`.
+1. Always render the preview before any LRO write. Greenfield → §3/§4/§5; brownfield → same tiers + §6 + §7.
+2. Wait for explicit `yes` from the user.
 3. On `edit`, regenerate the proposal from the user's revised intent — do **not** apply a partial update.
 4. On `cancel`, leave the existing ontology untouched and discard the proposed envelope.
-5. Persist the **post-write snapshot** alongside the spec in the consumer's repo, so the next run's diff is reliable.
+5. Persist the **post-write snapshot** alongside the spec so the next run's diff is reliable.
 
 A skill consumer agent **must not**:
 
-- Skip the preview because the change "looks small" — there is no safe threshold.
-- Compress KEEP rows into "(no other changes)" — the user must see everything in the post-update envelope, because `updateDefinition` is replace-the-whole-tree.
-- Auto-confirm in non-interactive mode without an explicit `--yes` flag from the caller. If the caller didn't say yes, ask.
+- Skip the preview because the change "looks small".
+- Compress `✅` rows out of the affected-parts list — replace-the-whole-tree semantics make every retained part user-visible.
+- Auto-confirm in non-interactive mode without an explicit `--yes` flag from the caller.
