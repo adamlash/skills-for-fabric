@@ -13,7 +13,7 @@ For the full fetch-and-decode scripts referenced here, see [grounding-extraction
 ```bash
 # 0. Discover IDs
 WS_NAME="My-Archimed-Workspace"
-ONT_NAME="AirlineOntology"
+ONT_NAME="ZavaAirlinesOntology"
 
 WS_ID=$(az rest --method GET \
   --url "https://api.fabric.microsoft.com/v1/workspaces" \
@@ -44,13 +44,13 @@ Expected shape of step 3:
 
 ```json
 {
-  "onto": "AirlineOntology",
+  "onto": "ZavaAirlinesOntology",
   "entityTypes": [
     { "name": "Airline", "keys": ["..."], "bindings": [ { "kind": "LakehouseTable", "table": "Airlines" } ] },
-    { "name": "Tank",    "keys": ["..."], "bindings": [ { "kind": "LakehouseTable", "table": "Tanks" }, { "kind": "KustoTable", "table": "TankReadings" } ] }
+    { "name": "Aircraft",    "keys": ["..."], "bindings": [ { "kind": "LakehouseTable", "table": "Aircrafts" }, { "kind": "KustoTable", "table": "AircraftReadings" } ] }
   ],
   "relationships": [
-    { "name": "operates", "source": "<Airline et id>", "target": "<Tank et id>" }
+    { "name": "operates", "source": "<Airline et id>", "target": "<Aircraft et id>" }
   ]
 }
 ```
@@ -59,13 +59,13 @@ Expected shape of step 3:
 
 ## Example 2 — Route a non-timeseries read to `sqldw-consumption-cli` (default)
 
-> User intent: "list all tanks manufactured by Contoso." Entity type `Tank` has a `NonTimeSeries` binding against Lakehouse `dbo.Tanks`. **Default route is SQL endpoint**; route to Spark only on explicit user preference.
+> User intent: "list all aircraft manufactured by Contoso." Entity type `Aircraft` has a `NonTimeSeries` binding against Lakehouse `dbo.Aircrafts`. **Default route is SQL endpoint**; route to Spark only on explicit user preference.
 
 ### Extract routing inputs from grounding JSON
 
 ```bash
 jq -c '
-  .entityTypes[] | select(.name=="Tank")
+  .entityTypes[] | select(.name=="Aircraft")
   | .bindings[] | select(.dataBindingType=="NonTimeSeries" and .source.kind=="LakehouseTable")
   | {
       workspaceId: .source.workspaceId,
@@ -84,7 +84,7 @@ jq -c '
 ```sql
 -- T-SQL — user intent mapped through propertyBindings
 SELECT TOP 100 AssetId, Manufacturer
-FROM   dbo.Tanks
+FROM   dbo.Aircrafts
 WHERE  Manufacturer = 'Contoso';
 ```
 
@@ -95,7 +95,7 @@ Hand off to `sqldw-consumption-cli` with resolved `{ workspaceId, itemId, source
 ```sql
 -- Spark SQL — use Spark-native syntax; no DATEADD / SYSUTCDATETIME
 SELECT AssetId, Manufacturer
-FROM   dbo.Tanks
+FROM   dbo.Aircrafts
 WHERE  Manufacturer = 'Contoso'
 LIMIT  100
 ```
@@ -106,13 +106,13 @@ Hand off to `spark-consumption-cli` with the same resolved connection + this Spa
 
 ## Example 3 — Route a timeseries read to `eventhouse-consumption-cli`
 
-> User intent: "show temperature spikes on tank `T-42` in the last hour." Entity type `Tank` has a `TimeSeries` binding against Eventhouse table `TankReadings`.
+> User intent: "show altitude excursions on aircraft `N42ZA` in the last hour." Entity type `Aircraft` has a `TimeSeries` binding against Eventhouse table `AircraftReadings`.
 
 ### Extract routing inputs
 
 ```bash
 jq -c '
-  .entityTypes[] | select(.name=="Tank")
+  .entityTypes[] | select(.name=="Aircraft")
   | .bindings[] | select(.dataBindingType=="TimeSeries" and .source.kind=="KustoTable")
   | {
       clusterUri: .source.clusterUri,
@@ -122,15 +122,15 @@ jq -c '
       keyCol:     (.propertyBindings[] | select(.targetPropertyId == $key) | .sourceColumnName),
       tempCol:    (.propertyBindings[] | select(.targetPropertyId == $temp) | .sourceColumnName)
     }
-' --argjson key '"<tankid-prop-id>"' --argjson temp '"<temperature-prop-id>"' \
+' --argjson key '"<tankid-prop-id>"' --argjson temp '"<altitude-prop-id>"' \
   ./_ont/grounding.json
 ```
 
 ### Compose KQL and delegate (pattern; `eventhouse-consumption-cli` owns the actual `az rest` call)
 
 ```kql
-TankReadings
-| where AssetId == "T-42"
+AircraftReadings
+| where AssetId == "N42ZA"
 | where PreciseTimestamp > ago(1h)
 | where Temp_C > 80
 | project PreciseTimestamp, Temp_C
@@ -149,28 +149,28 @@ Delegate payload:
 
 ## Example 4 — Cross-source relationship traversal
 
-> User intent: "Which tanks does Airline `AC` operate, and what is the latest temperature reading for each?" The relationship `operates` has:
+> User intent: "Which aircraft does Airline `AC` operate, and what is the latest altitude readings for each?" The relationship `operates` has:
 >
-> - A Lakehouse contextualization on `dbo.AirlineTankLink (AirlineId, TankId)`
+> - A Lakehouse contextualization on `dbo.HubAircraftAssignment (AirlineId, TailNumber)`
 > - `Airline` entity type bound to Lakehouse `dbo.Airlines`
-> - `Tank` entity type with a `TimeSeries` binding to Eventhouse `TankReadings`
+> - `Aircraft` entity type with a `TimeSeries` binding to Eventhouse `AircraftReadings`
 
-### Step 1 — Lakehouse: list tank keys for `AC`
+### Step 1 — Lakehouse: list aircraft keys for `AC`
 
 ```sql
 -- Delegated to sqldw-consumption-cli (Lakehouse SQL endpoint)
-SELECT DISTINCT TankId
-FROM   dbo.AirlineTankLink
-WHERE  AirlineId = 'AC'
+SELECT DISTINCT TailNumber
+FROM   dbo.HubAircraftAssignment
+WHERE  AirlineId = 'ZA'
 ```
 
-### Step 2 — Eventhouse: latest reading per tank
+### Step 2 — Eventhouse: latest reading per aircraft
 
 ```kql
 // Delegated to eventhouse-consumption-cli
-let tanks = dynamic([ "T-42", "T-43", "T-77" ]);    // from Step 1 results
-TankReadings
-| where AssetId in (tanks)
+let aircraft = dynamic([ "N42ZA", "T-43", "T-77" ]);    // from Step 1 results
+AircraftReadings
+| where AssetId in (aircraft)
 | where PreciseTimestamp > ago(24h)
 | summarize arg_max(PreciseTimestamp, *) by AssetId
 | project AssetId, PreciseTimestamp, Temp_C
@@ -178,9 +178,9 @@ TankReadings
 
 ### Step 3 — Merge in the agent
 
-Pair Step 1 output (tank IDs) with Step 2 output (latest readings) on `TankId`/`AssetId`, then render using ontology-level property names (`TankId`, `PreciseTimestamp`, `Temperature`) — not the physical columns.
+Pair Step 1 output (aircraft IDs) with Step 2 output (latest readings) on `TailNumber`/`AssetId`, then render using ontology-level property names (`TailNumber`, `PreciseTimestamp`, `AltitudeFt`) — not the physical columns.
 
-> **Size guard:** if Step 1 returns more than ~10,000 `TankId` values, fall back to narrowing Step 1 (add more filters), tightening the Kusto time window in Step 2, or batching the key list into multiple sub-10k Kusto calls. See [routing.md § Cross-Source Traversal](routing.md#cross-source-traversal-lakehouse--eventhouse).
+> **Size guard:** if Step 1 returns more than ~10,000 `TailNumber` values, fall back to narrowing Step 1 (add more filters), tightening the Kusto time window in Step 2, or batching the key list into multiple sub-10k Kusto calls. See [routing.md § Cross-Source Traversal](routing.md#cross-source-traversal-lakehouse--eventhouse).
 
 ---
 

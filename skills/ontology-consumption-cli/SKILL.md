@@ -113,7 +113,7 @@ WS_ID=$(az rest --method GET \
   | jq -r --arg n "$WS_NAME" '.value[] | select(.displayName==$n) | .id')
 
 # 3. Resolve ontology item ID from display name
-ONT_NAME="AirlineOntology"
+ONT_NAME="ZavaAirlinesOntology"
 ONT_ID=$(az rest --method GET \
   --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/items?type=Ontology" \
   --resource "https://api.fabric.microsoft.com" \
@@ -235,7 +235,7 @@ Deep recipe + per-skill invocation templates: [routing.md](references/routing.md
 
 ### Must
 
-- **Clarify before routing ambiguous prompts** — if the user asks "show me tank readings" and multiple entity types bind to tank-like tables, ask which entity type / binding to use. Silent guessing produces wrong data.
+- **Clarify before routing ambiguous prompts** — if the user asks "show me aircraft readings" and multiple entity types bind to aircraft-like tables, ask which entity type / binding to use. Silent guessing produces wrong data.
 - **Resolve `WS_ID` and `ONT_ID` before fetching the definition** — hardcoded GUIDs are a top failure mode.
 - **Follow the LRO pattern on `getDefinition`** — a `202` with `Location` is normal; do not treat it as success. Poll until `Succeeded`, then GET `${LOC}/result`.
 - **Decode every relevant part before answering** — never respond from a cached partial view of the ontology. The caller may have added / altered entity types since you last read.
@@ -299,17 +299,17 @@ Step 6 → Post-process results back into ontology-property naming for the user 
 After a grounding pass, generate queries using the physical columns recorded in `propertyBindings[]`, never the ontology names:
 
 ```text
-Entity type "Tank" with binding:
+Entity type "Aircraft" with binding:
   source kind = KustoTable
-  sourceTableName = "TankReadings"
+  sourceTableName = "AircraftReadings"
   timestampColumnName = "PreciseTimestamp"
-  propertyBindings: { Temperature → SourceColumn "Temp_C", TankId → SourceColumn "AssetId" }
+  propertyBindings: { AltitudeFt → SourceColumn "Temp_C", TailNumber → SourceColumn "AssetId" }
 
-User intent: "show temperature spikes on tank T-42 in the last hour"
+User intent: "show altitude excursions on aircraft N42ZA in the last hour"
 
 Generated KQL (delegated to eventhouse-consumption-cli):
-  TankReadings
-  | where AssetId == "T-42"
+  AircraftReadings
+  | where AssetId == "N42ZA"
   | where PreciseTimestamp > ago(1h)
   | project PreciseTimestamp, Temp_C
   | where Temp_C > 80
@@ -318,14 +318,14 @@ Generated KQL (delegated to eventhouse-consumption-cli):
 ### Relationship Traversal
 
 ```text
-Relationship "operates" (Airline → Tank)
-Contextualization: LakehouseTable "AirlineTankLink" with (AirlineId, TankId) columns
-  AND two entity-type bindings (Airline on LakehouseTable "Airlines", Tank on KustoTable "TankReadings")
+Relationship "operates" (Airline → Aircraft)
+Contextualization: LakehouseTable "HubAircraftAssignment" with (AirlineId, TailNumber) columns
+  AND two entity-type bindings (Airline on LakehouseTable "Airlines", Aircraft on KustoTable "AircraftReadings")
 
-User intent: "which tanks does Airline 'AC' operate and what's their latest reading?"
+User intent: "which aircraft does Airline 'ZA' operate and what's their latest reading?"
 
-Step 1: sqldw-consumption-cli → SELECT TankId FROM AirlineTankLink WHERE AirlineId = 'AC'
-Step 2: eventhouse-consumption-cli → TankReadings | where AssetId in (<TankIds>) | summarize arg_max(PreciseTimestamp, *) by AssetId
+Step 1: sqldw-consumption-cli → SELECT TailNumber FROM HubAircraftAssignment WHERE AirlineId = 'ZA'
+Step 2: eventhouse-consumption-cli → AircraftReadings | where AssetId in (<TankIds>) | summarize arg_max(PreciseTimestamp, *) by AssetId
 Step 3: Merge results in the agent; present with ontology-level column names.
 ```
 

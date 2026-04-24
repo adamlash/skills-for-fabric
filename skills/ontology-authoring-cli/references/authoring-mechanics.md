@@ -81,7 +81,7 @@ Minimal envelope shape:
 
 ```json
 {
-  "displayName": "archimed_ontology",
+  "displayName": "zava_airlines_ontology",
   "type": "Ontology",
   "definition": {
     "parts": [
@@ -116,18 +116,18 @@ Example entity type file (placed at `EntityTypes/{entityTypeId}/definition.json`
   "id": "8813598896083",
   "namespace": "usertypes",
   "namespaceType": "Custom",
-  "name": "Tank",
+  "name": "Aircraft",
   "baseEntityTypeId": null,
   "visibility": "Visible",
   "entityIdParts": [ "3117068036374594013" ],
   "displayNamePropertyId": "3117068036374594013",
   "properties": [
-    { "id": "3117068036374594013", "name": "TankId",       "redefines": null, "baseTypeNamespaceType": null, "valueType": "String" },
+    { "id": "3117068036374594013", "name": "TailNumber",       "redefines": null, "baseTypeNamespaceType": null, "valueType": "String" },
     { "id": "3117068031950000331", "name": "Manufacturer", "redefines": null, "baseTypeNamespaceType": null, "valueType": "String" }
   ],
   "timeseriesProperties": [
     { "id": "3114584981368796953", "name": "PreciseTimestamp", "redefines": null, "baseTypeNamespaceType": null, "valueType": "DateTime" },
-    { "id": "3114584977562679672", "name": "Temperature",      "redefines": null, "baseTypeNamespaceType": null, "valueType": "Double" }
+    { "id": "3114584977562679672", "name": "AltitudeFt",      "redefines": null, "baseTypeNamespaceType": null, "valueType": "Double" }
   ]
 }
 ```
@@ -163,14 +163,14 @@ Non-timeseries binding (lakehouse):
   "dataBindingConfiguration": {
     "dataBindingType": "NonTimeSeries",
     "propertyBindings": [
-      { "sourceColumnName": "TankId",       "targetPropertyId": "3117068036374594013" },
+      { "sourceColumnName": "TailNumber",       "targetPropertyId": "3117068036374594013" },
       { "sourceColumnName": "Manufacturer", "targetPropertyId": "3117068031950000331" }
     ],
     "sourceTableProperties": {
       "sourceType": "LakehouseTable",
       "workspaceId": "<WS_ID>",
       "itemId": "<LH_ID>",
-      "sourceTableName": "tank_static",
+      "sourceTableName": "aircraft_static",
       "sourceSchema": "dbo"
     }
   }
@@ -187,8 +187,8 @@ Timeseries binding (lakehouse):
     "timestampColumnName": "PreciseTimestamp",
     "propertyBindings": [
       { "sourceColumnName": "PreciseTimestamp", "targetPropertyId": "3114584981368796953" },
-      { "sourceColumnName": "Temperature",      "targetPropertyId": "3114584977562679672" },
-      { "sourceColumnName": "TankId",           "targetPropertyId": "3117068036374594013" }
+      { "sourceColumnName": "AltitudeFt",      "targetPropertyId": "3114584977562679672" },
+      { "sourceColumnName": "TailNumber",           "targetPropertyId": "3117068036374594013" }
     ],
     "sourceTableProperties": {
       "sourceType": "LakehouseTable",
@@ -211,8 +211,8 @@ Timeseries binding (eventhouse / Kusto):
     "timestampColumnName": "PreciseTimestamp",
     "propertyBindings": [
       { "sourceColumnName": "PreciseTimestamp", "targetPropertyId": "3114584981368796953" },
-      { "sourceColumnName": "Temperature",      "targetPropertyId": "3114584977562679672" },
-      { "sourceColumnName": "TankId",           "targetPropertyId": "3117068036374594013" }
+      { "sourceColumnName": "AltitudeFt",      "targetPropertyId": "3114584977562679672" },
+      { "sourceColumnName": "TailNumber",           "targetPropertyId": "3117068036374594013" }
     ],
     "sourceTableProperties": {
       "sourceType": "KustoTable",
@@ -270,14 +270,14 @@ A contextualization tells the ontology how rows in a lakehouse table map to rela
     "sourceType": "LakehouseTable",
     "workspaceId": "<WS_ID>",
     "itemId": "<LH_ID>",
-    "sourceTableName": "site_tank_link",
+    "sourceTableName": "hub_aircraft_link",
     "sourceSchema": "dbo"
   },
   "sourceKeyRefBindings": [
-    { "sourceColumnName": "SiteId", "targetPropertyId": "<site_key_property_id>" }
+    { "sourceColumnName": "HubId", "targetPropertyId": "<site_key_property_id>" }
   ],
   "targetKeyRefBindings": [
-    { "sourceColumnName": "TankId", "targetPropertyId": "<tank_key_property_id>" }
+    { "sourceColumnName": "TailNumber", "targetPropertyId": "<tank_key_property_id>" }
   ]
 }
 ```

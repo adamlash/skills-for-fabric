@@ -10,7 +10,7 @@ End-to-end worked examples composing the operations documented in [authoring-mec
 
 ```bash
 # Prereqs: WS_ID, LH_ID resolved (see SKILL.md § Connection)
-ONTO_NAME="archimed_ontology"
+ONTO_NAME="zava_airlines_ontology"
 
 # --- 1. Create empty ontology ---
 PLATFORM_JSON='{"metadata":{"type":"Ontology","displayName":"'"$ONTO_NAME"'"}}'
@@ -43,24 +43,24 @@ az rest --method POST \
 
 ---
 
-## Example 2: Add a `Tank` entity type + non-timeseries binding via `updateDefinition`
+## Example 2: Add a `Aircraft` entity type + non-timeseries binding via `updateDefinition`
 
 ```bash
 # IDs (persist these in your repo; do not regenerate on every run)
-TANK_ET_ID=8813598896083
-TANK_KEY_PROP_ID=3117068036374594013
-TANK_MFR_PROP_ID=3117068031950000331
+AIRCRAFT_ET_ID=8813598896083
+AIRCRAFT_KEY_PROP_ID=3117068036374594013
+AIRCRAFT_MFR_PROP_ID=3117068031950000331
 BINDING_GUID=$(uuidgen)
 
 # --- Build the new parts ---
 ET_JSON=$(jq -nc \
-  --arg id "$TANK_ET_ID" \
-  --arg keyId "$TANK_KEY_PROP_ID" \
-  --arg mfrId "$TANK_MFR_PROP_ID" \
-  '{id:$id,namespace:"usertypes",namespaceType:"Custom",name:"Tank",baseEntityTypeId:null,
+  --arg id "$AIRCRAFT_ET_ID" \
+  --arg keyId "$AIRCRAFT_KEY_PROP_ID" \
+  --arg mfrId "$AIRCRAFT_MFR_PROP_ID" \
+  '{id:$id,namespace:"usertypes",namespaceType:"Custom",name:"Aircraft",baseEntityTypeId:null,
     visibility:"Visible",entityIdParts:[$keyId],displayNamePropertyId:$keyId,
     properties:[
-      {id:$keyId,name:"TankId",redefines:null,baseTypeNamespaceType:null,valueType:"String"},
+      {id:$keyId,name:"TailNumber",redefines:null,baseTypeNamespaceType:null,valueType:"String"},
       {id:$mfrId,name:"Manufacturer",redefines:null,baseTypeNamespaceType:null,valueType:"String"}
     ],
     timeseriesProperties:[]}')
@@ -69,16 +69,16 @@ BIND_JSON=$(jq -nc \
   --arg id "$BINDING_GUID" \
   --arg ws "$WS_ID" \
   --arg lh "$LH_ID" \
-  --arg keyId "$TANK_KEY_PROP_ID" \
-  --arg mfrId "$TANK_MFR_PROP_ID" \
+  --arg keyId "$AIRCRAFT_KEY_PROP_ID" \
+  --arg mfrId "$AIRCRAFT_MFR_PROP_ID" \
   '{id:$id,dataBindingConfiguration:{
       dataBindingType:"NonTimeSeries",
       propertyBindings:[
-        {sourceColumnName:"TankId",targetPropertyId:$keyId},
+        {sourceColumnName:"TailNumber",targetPropertyId:$keyId},
         {sourceColumnName:"Manufacturer",targetPropertyId:$mfrId}
       ],
       sourceTableProperties:{sourceType:"LakehouseTable",workspaceId:$ws,itemId:$lh,
-                             sourceTableName:"tank_static",sourceSchema:"dbo"}}}')
+                             sourceTableName:"aircraft_static",sourceSchema:"dbo"}}}')
 
 ET_B64=$(printf '%s' "$ET_JSON"   | base64 -w 0)
 BD_B64=$(printf '%s' "$BIND_JSON" | base64 -w 0)
@@ -91,53 +91,53 @@ BD_B64=$(printf '%s' "$BIND_JSON" | base64 -w 0)
 
 ---
 
-## Example 3: Add a relationship type `operates` from `Site` to `Tank`
+## Example 3: Add a relationship type `operates` from `Hub` to `Aircraft`
 
 ```bash
-SITE_ET_ID=159990879905613
-SITE_KEY_PROP_ID=3117068036083000111      # persist alongside other ID maps
+HUB_ET_ID=159990879905613
+HUB_KEY_PROP_ID=3117068036083000111      # persist alongside other ID maps
 OPERATES_REL_ID=3110733855942077719
 CTX_GUID=$(uuidgen)
 
-REL_JSON=$(jq -nc --arg id "$OPERATES_REL_ID" --arg src "$SITE_ET_ID" --arg tgt "$TANK_ET_ID" \
+REL_JSON=$(jq -nc --arg id "$OPERATES_REL_ID" --arg src "$HUB_ET_ID" --arg tgt "$AIRCRAFT_ET_ID" \
   '{namespace:"usertypes",id:$id,name:"operates",namespaceType:"Custom",
     source:{entityTypeId:$src},target:{entityTypeId:$tgt}}')
 
 CTX_JSON=$(jq -nc \
   --arg id "$CTX_GUID" --arg ws "$WS_ID" --arg lh "$LH_ID" \
-  --arg siteKey "$SITE_KEY_PROP_ID" --arg tankKey "$TANK_KEY_PROP_ID" \
+  --arg hubKey "$HUB_KEY_PROP_ID" --arg aircraftKey "$AIRCRAFT_KEY_PROP_ID" \
   '{id:$id,
     dataBindingTable:{sourceType:"LakehouseTable",workspaceId:$ws,itemId:$lh,
-                      sourceTableName:"site_tank_link",sourceSchema:"dbo"},
-    sourceKeyRefBindings:[{sourceColumnName:"SiteId",targetPropertyId:$siteKey}],
-    targetKeyRefBindings:[{sourceColumnName:"TankId",targetPropertyId:$tankKey}]}')
+                      sourceTableName:"hub_aircraft_link",sourceSchema:"dbo"},
+    sourceKeyRefBindings:[{sourceColumnName:"HubId",targetPropertyId:$hubKey}],
+    targetKeyRefBindings:[{sourceColumnName:"TailNumber",targetPropertyId:$aircraftKey}]}')
 ```
 
 > Splice into the envelope alongside the existing entity type parts, then call `updateDefinition`.
 
 ---
 
-## Example 4: Add a `Temperature` timeseries property + Eventhouse binding on `Tank`
+## Example 4: Add a `AltitudeFt` timeseries property + Eventhouse binding on `Aircraft`
 
-> Assumes Example 2 has already been applied (so `Tank` has a `NonTimeSeries` binding — required before any timeseries binding). `EH_ID`, `CLUSTER_URI`, `DB_NAME` are resolved per the SKILL.md § Connection → Eventhouse recipe.
+> Assumes Example 2 has already been applied (so `Aircraft` has a `NonTimeSeries` binding — required before any timeseries binding). `EH_ID`, `CLUSTER_URI`, `DB_NAME` are resolved per the SKILL.md § Connection → Eventhouse recipe.
 
 ```bash
-# Prereqs: WS_ID, ONTO_ID, TANK_ET_ID, TANK_KEY_PROP_ID from Example 2;
+# Prereqs: WS_ID, ONTO_ID, AIRCRAFT_ET_ID, AIRCRAFT_KEY_PROP_ID from Example 2;
 #          EH_ID, CLUSTER_URI, DB_NAME from SKILL.md § Connection → Eventhouse.
-TANK_TS_TIMESTAMP_ID=3117068031950000443     # DateTime timeseries property id (persist in repo)
-TANK_TS_TEMP_ID=3117068031950000444          # Double   timeseries property id
+AIRCRAFT_TS_TIMESTAMP_ID=3117068031950000443     # DateTime timeseries property id (persist in repo)
+AIRCRAFT_TS_ALT_ID=3117068031950000444          # Double   timeseries property id
 TS_BIND_GUID=$(uuidgen)
 
-# --- Add the timestamp + value timeseries properties to the Tank entity type ---
-# (Fetch the current EntityTypes/${TANK_ET_ID}/definition.json, append the two
+# --- Add the timestamp + value timeseries properties to the Aircraft entity type ---
+# (Fetch the current EntityTypes/${AIRCRAFT_ET_ID}/definition.json, append the two
 #  entries to timeseriesProperties[], base64-encode, splice back in. Pseudo
 #  below; see definition-script-templates.md for the full splice.)
 TS_PROPS_JSON=$(jq -nc \
-  --arg tsId "$TANK_TS_TIMESTAMP_ID" \
-  --arg tmpId "$TANK_TS_TEMP_ID" \
+  --arg tsId "$AIRCRAFT_TS_TIMESTAMP_ID" \
+  --arg altId "$AIRCRAFT_TS_ALT_ID" \
   '[
      {id:$tsId,  name:"EventTimestamp", redefines:null, baseTypeNamespaceType:null, valueType:"DateTime"},
-     {id:$tmpId, name:"Temperature",    redefines:null, baseTypeNamespaceType:null, valueType:"Double"}
+     {id:$altId, name:"AltitudeFt",    redefines:null, baseTypeNamespaceType:null, valueType:"Double"}
    ]')
 
 # --- Build the KustoTable timeseries binding ---
@@ -150,30 +150,30 @@ TS_BIND_JSON=$(jq -nc \
   --arg eh "$EH_ID" \
   --arg cu "$CLUSTER_URI" \
   --arg db "$DB_NAME" \
-  --arg tsId "$TANK_TS_TIMESTAMP_ID" \
-  --arg tmpId "$TANK_TS_TEMP_ID" \
+  --arg tsId "$AIRCRAFT_TS_TIMESTAMP_ID" \
+  --arg altId "$AIRCRAFT_TS_ALT_ID" \
   '{id:$id,dataBindingConfiguration:{
       dataBindingType:"TimeSeries",
       timestampColumnName:"EventEnqueuedUtcTime",
       propertyBindings:[
         {sourceColumnName:"EventEnqueuedUtcTime", targetPropertyId:$tsId},
-        {sourceColumnName:"Temperature",          targetPropertyId:$tmpId}
+        {sourceColumnName:"AltitudeFt",          targetPropertyId:$altId}
       ],
       sourceTableProperties:{sourceType:"KustoTable",workspaceId:$ws,itemId:$eh,
                              clusterUri:$cu,databaseName:$db,
-                             sourceTableName:"TankTelemetry"}}}')
+                             sourceTableName:"AircraftTelemetry"}}}')
 
 TS_BIND_B64=$(printf '%s' "$TS_BIND_JSON" | base64 -w 0)
 # On macOS: TS_BIND_B64=$(printf '%s' "$TS_BIND_JSON" | base64 | tr -d '\n')
 
 # Splice: append a new part at
-#   EntityTypes/${TANK_ET_ID}/DataBindings/${TS_BIND_GUID}.json
+#   EntityTypes/${AIRCRAFT_ET_ID}/DataBindings/${TS_BIND_GUID}.json
 # alongside the existing NonTimeSeries binding part, then call updateDefinition (LRO).
 ```
 
 > **Eventhouse binding invariants** the template must enforce before sending:
 >
-> - Entity type already has a `NonTimeSeries` binding (Eventhouse is timeseries-only). Example 2 above satisfies this for `Tank`.
+> - Entity type already has a `NonTimeSeries` binding (Eventhouse is timeseries-only). Example 2 above satisfies this for `Aircraft`.
 > - `timeseriesProperties[]` includes a `DateTime` property corresponding to `timestampColumnName`, and `propertyBindings[]` maps that column to that property.
 > - `KustoTable.itemId` is the **Eventhouse item ID** (from `/kqlDatabases/{id}/properties.parentEventhouseItemId` or `/eventhouses`), not the KQL database ID.
 > - `clusterUri` matches the KQL database's `properties.queryServiceUri`; `databaseName` matches its `displayName`.

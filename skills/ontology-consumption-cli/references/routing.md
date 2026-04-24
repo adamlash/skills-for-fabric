@@ -40,8 +40,8 @@ Every delegate call needs a minimal, strongly-typed set of fields. Do **not** fo
 Example KQL body (composed from grounding JSON, then handed to the delegate):
 
 ```kql
-TankReadings                                    // source.sourceTableName
-| where AssetId == "T-42"                       // key column from propertyBindings
+AircraftReadings                                    // source.sourceTableName
+| where AssetId == "N42ZA"                       // key column from propertyBindings
 | where PreciseTimestamp > ago(1h)              // timestampColumnName
 | project PreciseTimestamp, Temp_C              // propertyBindings sourceColumns
 ```
@@ -62,16 +62,16 @@ Example T-SQL (default dialect for `sqldw-consumption-cli`):
 
 ```sql
 SELECT TOP 100 AssetId, Manufacturer, InstalledOn
-FROM   dbo.Tanks
-WHERE  AssetId = 'T-42';
+FROM   dbo.Aircrafts
+WHERE  AssetId = 'N42ZA';
 ```
 
 Example T-SQL with time bounds (`TimeSeries` lakehouse binding):
 
 ```sql
 SELECT AssetId, EventTime, Temp_C
-FROM   dbo.TankReadings
-WHERE  AssetId   = 'T-42'
+FROM   dbo.AircraftReadings
+WHERE  AssetId   = 'N42ZA'
   AND  EventTime >= DATEADD(hour, -1, SYSUTCDATETIME());
 ```
 
@@ -79,8 +79,8 @@ Equivalent **Spark SQL** (when delegating to `spark-consumption-cli` — do **no
 
 ```sql
 SELECT AssetId, EventTime, Temp_C
-FROM   dbo.TankReadings
-WHERE  AssetId   = 'T-42'
+FROM   dbo.AircraftReadings
+WHERE  AssetId   = 'N42ZA'
   AND  EventTime >= current_timestamp() - INTERVAL 1 HOUR
 ```
 
@@ -99,19 +99,19 @@ Contextualizations are always `LakehouseTable` with a **linking table**. Keys ca
 Example T-SQL against the linking table (single-part key):
 
 ```sql
--- All Tanks operated by Airline 'AC'
-SELECT TankId
-FROM   dbo.AirlineTankLink
-WHERE  AirlineId = 'AC';
+-- All Aircrafts operated by Airline 'ZA'
+SELECT TailNumber
+FROM   dbo.HubAircraftAssignment
+WHERE  AirlineId = 'ZA';
 ```
 
 Example T-SQL with a **composite** key (two-part source → two-part target):
 
 ```sql
--- Linking table has (AirlineCode, RegionId) → (TankGroup, TankId)
-SELECT TankGroup, TankId
-FROM   dbo.AirlineTankLink
-WHERE  AirlineCode = 'AC'
+-- Linking table has (AirlineCode, RegionId) → (FleetGroup, TailNumber)
+SELECT FleetGroup, TailNumber
+FROM   dbo.HubAircraftAssignment
+WHERE  AirlineCode = 'ZA'
   AND  RegionId    = 'EMEA';
 ```
 
@@ -153,10 +153,10 @@ Hand off:
 - **Query**: a composed KQL string targeting `sourceTableName`, with the time filter on `timestampColumnName` and the key predicate using the physical column name from `propertyBindings[]`.
 
 ```bash
-# Fields extracted from grounding JSON (entityType "Tank", binding = KustoTable)
+# Fields extracted from grounding JSON (entityType "Aircraft", binding = KustoTable)
 CLUSTER_URI="https://<cluster>.kusto.fabric.microsoft.com"
 DB_NAME="TelemetryDB"
-COMPOSED_KQL="TankReadings | where AssetId == 'T-42' | where PreciseTimestamp > ago(1h) | project PreciseTimestamp, Temp_C"
+COMPOSED_KQL="AircraftReadings | where AssetId == 'N42ZA' | where PreciseTimestamp > ago(1h) | project PreciseTimestamp, Temp_C"
 # Handoff → eventhouse-consumption-cli runs this KQL via its own az rest wiring.
 ```
 
@@ -169,7 +169,7 @@ Hand off:
 ```bash
 WS_ID="<binding.source.workspaceId>"
 ITEM_ID="<binding.source.itemId>"          # lakehouse ID
-COMPOSED_TSQL="SELECT TOP 100 AssetId, Manufacturer FROM dbo.Tanks WHERE Manufacturer = 'Contoso'"
+COMPOSED_TSQL="SELECT TOP 100 AssetId, Manufacturer FROM dbo.Aircrafts WHERE Manufacturer = 'Contoso'"
 # Handoff → sqldw-consumption-cli runs this T-SQL via its own endpoint wiring.
 ```
 
@@ -182,7 +182,7 @@ Hand off:
 ```bash
 WS_ID="<binding.source.workspaceId>"
 ITEM_ID="<binding.source.itemId>"
-COMPOSED_SPARKSQL="SELECT AssetId, EventTime, Temp_C FROM dbo.TankReadings WHERE AssetId = 'T-42' AND EventTime >= current_timestamp() - INTERVAL 1 HOUR"
+COMPOSED_SPARKSQL="SELECT AssetId, EventTime, Temp_C FROM dbo.AircraftReadings WHERE AssetId = 'N42ZA' AND EventTime >= current_timestamp() - INTERVAL 1 HOUR"
 # Handoff → spark-consumption-cli runs this Spark SQL.
 ```
 
@@ -192,7 +192,7 @@ COMPOSED_SPARKSQL="SELECT AssetId, EventTime, Temp_C FROM dbo.TankReadings WHERE
 
 - **Always remap** ontology property names → `propertyBindings[].sourceColumnName` before building any KQL / Spark SQL / T-SQL. Forwarding an ontology property name to the delegate will fail.
 - **Always include a time filter** on `TimeSeries` bindings — `timestampColumnName > <from>`. The delegate will reject / time out on unbounded reads.
-- **Always read `workspaceId` + `itemId` from the binding**, not from the ontology. Cross-workspace bindings are legal — the ontology may live in workspace `A` while its `Tank` binding points at a lakehouse in workspace `B`:
+- **Always read `workspaceId` + `itemId` from the binding**, not from the ontology. Cross-workspace bindings are legal — the ontology may live in workspace `A` while its `Aircraft` binding points at a lakehouse in workspace `B`:
 
   ```text
   ontology.workspaceId        = "11111111-..."   ← do NOT pass this to the delegate
@@ -224,8 +224,8 @@ COMPOSED_SPARKSQL="SELECT AssetId, EventTime, Temp_C FROM dbo.TankReadings WHERE
 Some tasks look like data queries but are purely metadata. Answer these from the grounding JSON — do not invoke a delegate:
 
 - "What entity types are in this ontology?" → grounding JSON `entityTypes[].name`.
-- "What are the properties of Tank?" → grounding JSON `entityTypes[name=Tank].properties[]` + `timeseriesProperties[]`.
+- "What are the properties of Aircraft?" → grounding JSON `entityTypes[name=Aircraft].properties[]` + `timeseriesProperties[]`.
 - "Which Eventhouse backs this ontology?" → grounding JSON `entityTypes[].bindings[].source.kind == KustoTable` → `itemId` + `clusterUri` + `databaseName`.
-- "How is Airline related to Tank?" → grounding JSON `relationshipTypes[]` + `contextualizations[]`.
+- "How is Airline related to Aircraft?" → grounding JSON `relationshipTypes[]` + `contextualizations[]`.
 
 Delegating for these produces noise and may incur unnecessary capacity cost.

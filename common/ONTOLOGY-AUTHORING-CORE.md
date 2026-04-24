@@ -174,7 +174,7 @@ Time-series — lakehouse source (note: static binding must already exist on thi
     "propertyBindings": [
       { "sourceColumnName": "PreciseTimestamp", "targetPropertyId": "3114584981368796953" },
       { "sourceColumnName": "Name",             "targetPropertyId": "3114584979743320934" },
-      { "sourceColumnName": "Temperature",      "targetPropertyId": "3114584977562679672" },
+      { "sourceColumnName": "AltitudeFt",      "targetPropertyId": "3114584977562679672" },
       { "sourceColumnName": "Name",             "targetPropertyId": "3117068036374594013" }
     ],
     "sourceTableProperties": {
@@ -198,14 +198,14 @@ Time-series — eventhouse source:
     "timestampColumnName": "PreciseTimestamp",
     "propertyBindings": [
       { "sourceColumnName": "PreciseTimestamp", "targetPropertyId": "3114584981368796953" },
-      { "sourceColumnName": "Temperature",      "targetPropertyId": "3114584977562679672" }
+      { "sourceColumnName": "AltitudeFt",      "targetPropertyId": "3114584977562679672" }
     ],
     "sourceTableProperties": {
       "sourceType": "KustoTable",
       "workspaceId": "580f410e-733d-43bd-8a87-be12b536f7ff",
       "itemId": "a1f22aaa-b5c2-4d12-a3d4-8821c50a90cd",
       "clusterUri": "https://trd-xxxx.z0.kusto.fabric.microsoft.com",
-      "databaseName": "Telemetry",
+      "databaseName": "Zava_Telemetry",
       "sourceTableName": "equipment_timeseries"
     }
   }

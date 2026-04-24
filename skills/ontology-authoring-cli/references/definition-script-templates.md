@@ -58,7 +58,7 @@ jq -r '.definition.parts[] | "\(.path)\t\(.payload)"' "$WORK/current.json" \
 
 # 3. Mutate — drop new/updated JSON files into $WORK/tree/...
 #    e.g. add a new entity type
-#    cp my-new-tank.json "$WORK/tree/EntityTypes/8813598896083/definition.json"
+#    cp my-new-aircraft.json "$WORK/tree/EntityTypes/8813598896083/definition.json"
 
 # 4. Rebuild envelope from $WORK/tree/
 #    Note: base64 -w 0 is GNU-only; on macOS use `base64 | tr -d '\n'`.
