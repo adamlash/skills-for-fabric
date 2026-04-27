@@ -61,6 +61,8 @@ description: >
 | Grounding Context Extraction (deep reference)    | [grounding-extraction.md](references/grounding-extraction.md)                                                                | Decode parts → grounding JSON for agents                          |
 | Query Routing (deep reference)                   | [routing.md](references/routing.md)                                                                                          | Binding kind → per-datasource skill + query shape                 |
 | Worked Examples                                  | [examples.md](references/examples.md)                                                                                        | End-to-end bash recipes (enumerate → route → query)               |
+| Graph Walks (N-hop neighborhood from anchor)     | [graph-walks.md](references/graph-walks.md)                                                                                  | Anchor entity + hop budget → composed inline reads, no scripts    |
+| Snappy-Response Discipline                       | [SKILL.md § Snappy-Response Discipline](#snappy-response-discipline)                                                         | Inline-first; script only when stateful or re-runnable            |
 | Must / Prefer / Avoid / Troubleshooting          | [SKILL.md § Must / Prefer / Avoid / Troubleshooting](#must--prefer--avoid--troubleshooting)                                  | LLM decision rules                                                |
 | Agentic Workflows                                | [SKILL.md § Agentic Workflows](#agentic-workflows)                                                                           | Ground-then-query loop, schema-aware query generation             |
 | Agent Integration Notes                          | [SKILL.md § Agent Integration Notes](#agent-integration-notes)                                                               | How this skill composes with authoring / per-datasource skills    |
@@ -242,12 +244,15 @@ Deep recipe + per-skill invocation templates: [routing.md](references/routing.md
 - **Translate ontology property names → source column names via `propertyBindings[]`** before generating any KQL / Spark SQL / T-SQL. The sibling consumption skills see only physical columns.
 - **Respect the binding type** — `TimeSeries` requires a time filter on `timestampColumnName`. Omitting it is a full scan and often rejected by the downstream skill.
 - **Preserve `workspaceId` + `itemId` per binding** — ontology bindings can reference source items in **different workspaces** from the ontology itself; do not assume collocation.
+- **Consult the in-memory grounding before issuing metadata calls** — once the grounding JSON is decoded for the session, every subsequent walk / query reads source-column names, linking-table names, item GUIDs, `clusterUri`, `databaseName`, and SQL-endpoint host **from grounding**, not from a fresh `list items` / `get eventhouse` round trip. Re-fetching metadata you already have is the #1 cause of bloated call counts.
+- **Use GUIDs, not friendly names, in source URLs** — many tenants run with `FriendlyNameSupportDisabled`, which silently rejects names like `MyLakehouse.Lakehouse` in OneLake DFS / Fabric REST URLs. Always pull the GUID from grounding and substitute it into the URL.
 
 ### Prefer
 
 - **`az rest` with `--body @file.json`** for any downstream KQL / SQL payload that contains `|`, `"`, or newlines. Inline `--body` breaks under shell escaping — see [EVENTHOUSE-CONSUMPTION-CORE.md](../../common/EVENTHOUSE-CONSUMPTION-CORE.md).
 - **Grounding summary JSON** (see schema above) over raw `definition.json` dumps when handing context to another agent.
 - **`take 100` / `TOP 100`** on first read of any entity's data, then refine.
+- **Inline `az rest` / `curl` over Python scripts** for read-only consumption work — graph walks, single-entity lookups, and ad-hoc fan-out reads should compose ≤ ~15 REST calls in the shell. Reach for a script only when the work is **stateful** (envelope assembly, ID maps, LROs that the user wants re-runnable). See [Snappy-Response Discipline](#snappy-response-discipline) and [graph-walks.md](references/graph-walks.md).
 - **Cache the decoded definition for the life of one session** — the ontology definition is orders of magnitude smaller than the source data and rarely changes mid-task. Refetch if the user mentions authoring activity.
 - **`project` / `SELECT` only the bound source columns**, not the full physical table — ontology bindings imply an explicit column whitelist.
 
@@ -277,6 +282,32 @@ Deep recipe + per-skill invocation templates: [routing.md](references/routing.md
 ---
 
 ## Agentic Workflows
+
+### Snappy-Response Discipline
+
+Consumption is read-only and should *feel* fast. The default mode is **inline composition** in the shell — not a Python wrapper. Use this checklist before reaching for a script:
+
+| Situation | Inline (`az rest` / `curl`) | Python / shell script |
+|---|:-:|:-:|
+| Single-entity lookup | ✅ | ❌ |
+| Time-series window read | ✅ | ❌ |
+| Graph walk, hop ≤ 2 (see [graph-walks.md](references/graph-walks.md)) | ✅ | ❌ |
+| Cross-source relationship traversal (LH keys → KQL fan-out) | ✅ | ❌ |
+| Grounding-JSON extraction (one-shot) | ✅ | ❌ |
+| LRO `getDefinition` poll loop the user wants to re-run | ➖ | ✅ |
+| Ontology authoring / mutation (35-part envelope, ID cross-refs) | ❌ | ✅ (handoff to `ontology-authoring-cli`) |
+| Long-lived seeding / batch loads with retry & checkpoint | ❌ | ✅ |
+
+**Inline-first principles**
+
+1. **Compose, don't script.** Each REST call is independently meaningful; chain with `&&` / `|` / `jq` rather than wrapping in a `.py`.
+2. **Parallelize fan-out.** Independent reads (linking-table queries, per-entity-type IN-list reads) go in `&` with `wait`, not sequential `for` loops.
+3. **One round trip per group.** `WHERE id IN (...)` not N×`WHERE id = '...'`.
+4. **Cache the grounding JSON** for the session — it does not change between queries, and refetching it doubles every walk's latency.
+5. **Stream early.** Show the anchor row and first neighbor group as soon as they return; don't block presentation on the full walk.
+6. **No script unless asked.** If the user says "save this for later" or "re-run nightly", *then* package as a script. Otherwise keep the work in chat-replayable shell.
+
+If a task starts to look like it needs > ~20 REST calls, > 2 hops, or persistent state across calls, surface this to the user before scripting — it usually means the question should be narrowed, not automated.
 
 ### "Ground then Query" Sequence
 
@@ -329,13 +360,26 @@ Step 2: eventhouse-consumption-cli → AircraftReadings | where AssetId in (<Tan
 Step 3: Merge results in the agent; present with ontology-level column names.
 ```
 
-Full end-to-end bash recipes (enumerate → ground → route → query) live in [examples.md](references/examples.md).
+Full end-to-end bash recipes (enumerate → ground → route → query) live in [examples.md](references/examples.md). For "show me everything related to X" prompts, jump straight to the N-hop walk in [graph-walks.md](references/graph-walks.md).
+
+### Graph Walks (N-hop from an anchor)
+
+When the user gives an instance ("Panel7", "aircraft N42ZA", "customer 1234") and asks for *its neighborhood* — not a single column — use the dedicated **graph walk** pattern instead of inventing a recipe per question.
+
+```text
+Anchor → relationships touching anchor (from grounding JSON, in-memory)
+       → linking-table reads (parallel, one per relationship)
+       → IN-list reads of neighbor entities (one per EntityType)
+       → optional KustoTable telemetry sweep (one per EntityType with TS binding)
+```
+
+For hop=1 this is typically ≤ 10 round trips and stays inline. Full algorithm, fan-out template, hop budget, and a worked Panel7 example live in [graph-walks.md](references/graph-walks.md).
 
 ---
 
 ## Examples
 
-End-to-end worked examples (enumerate an ontology → build grounding JSON → route a source-table query to the correct sibling consumption skill → traverse a relationship across Lakehouse + Eventhouse) live in [examples.md](references/examples.md). Complete fetch-and-decode scripts live in [grounding-extraction.md](references/grounding-extraction.md). Per-binding-type invocation templates live in [routing.md](references/routing.md).
+End-to-end worked examples (enumerate an ontology → build grounding JSON → route a source-table query to the correct sibling consumption skill → traverse a relationship across Lakehouse + Eventhouse) live in [examples.md](references/examples.md). N-hop neighborhood walks from an anchor instance (Panel7-style) live in [graph-walks.md](references/graph-walks.md). Complete fetch-and-decode scripts live in [grounding-extraction.md](references/grounding-extraction.md). Per-binding-type invocation templates live in [routing.md](references/routing.md).
 
 ---
 
