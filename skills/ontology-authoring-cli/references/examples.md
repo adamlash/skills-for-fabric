@@ -6,6 +6,41 @@ End-to-end worked examples composing the operations documented in [authoring-mec
 
 ---
 
+## Schema Discovery Recipes
+
+Before composing bindings, discover the source table schemas to avoid hallucinating column names.
+
+### Lakehouse table columns
+
+```bash
+# Option 1: Fabric Tables API (table names only — no columns)
+az rest --method GET \
+  --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/lakehouses/${LH_ID}/tables" \
+  --resource "https://api.fabric.microsoft.com"
+
+# Option 2: OneLake Table API (Iceberg metadata — full column schema)
+# Use the Fabric MCP tool `fabric-onelake_get_table` with namespace="dbo" and table="<name>"
+# to retrieve Iceberg metadata including column names and types.
+
+# Option 3: SQL endpoint INFORMATION_SCHEMA (requires lakehouse SQL connection)
+# SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
+# WHERE TABLE_NAME = 'SiteCatalog' AND TABLE_SCHEMA = 'dbo'
+```
+
+### Eventhouse / KQL table columns
+
+```bash
+TOKEN=$(az account get-access-token --resource "https://kusto.kusto.windows.net" --query accessToken -o tsv)
+# .show table <name> schema as json → parse OrderedColumns for column names and CslType
+curl -s -X POST "${CLUSTER_URI}/v1/rest/query" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"db":"'"$DB_NAME"'","csl":".show table EquipmentTelemetry schema as json"}'
+# Map CslType → ontology valueType:
+#   string → String | datetime → DateTime | real/double → Double | long → BigInt | bool → Boolean
+```
+
+---
+
 ## Example 1: Create an empty ontology, then add a single entity type
 
 ```bash
@@ -108,7 +143,7 @@ CTX_JSON=$(jq -nc \
   --arg hubKey "$HUB_KEY_PROP_ID" --arg aircraftKey "$AIRCRAFT_KEY_PROP_ID" \
   '{id:$id,
     dataBindingTable:{sourceType:"LakehouseTable",workspaceId:$ws,itemId:$lh,
-                      sourceTableName:"hub_aircraft_link",sourceSchema:"dbo"},
+                      sourceTableName:"zava_hub_aircraft_link",sourceSchema:"dbo"},
     sourceKeyRefBindings:[{sourceColumnName:"HubId",targetPropertyId:$hubKey}],
     targetKeyRefBindings:[{sourceColumnName:"TailNumber",targetPropertyId:$aircraftKey}]}')
 ```

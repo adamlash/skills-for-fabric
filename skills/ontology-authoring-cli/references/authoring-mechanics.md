@@ -12,7 +12,7 @@ The envelope is the same as any other Fabric item definition — a `definition` 
 
 ```json
 {
-  "displayName": "my-ontology",
+  "displayName": "zava_airlines_ontology",
   "type": "Ontology",
   "definition": {
     "parts": [
@@ -37,7 +37,7 @@ b64d()  { printf '%s' "$1" | base64 -d; }
 # b64d() { printf '%s' "$1" | base64 -D; }
 ```
 
-> If you need one snippet that works on both: `base64 | tr -d '\n'` for encode and `python3 -c "import sys,base64; sys.stdout.buffer.write(base64.b64decode(sys.stdin.read()))"` for decode.
+> If you need one snippet that works on both: `base64 | tr -d '\n'` for encode and `base64 -d` (GNU) / `base64 -D` (BSD) for decode.
 
 See [ITEM-DEFINITIONS-CORE.md § Definition Envelope](../../../common/ITEM-DEFINITIONS-CORE.md#definition-envelope) for the generic pattern.
 
@@ -50,16 +50,23 @@ Entity type, relationship type, and property IDs must be **positive 64-bit integ
 **Guide the LLM to generate:**
 
 - Entity/relationship/property IDs: random positive 15–18 digit integers (safely inside 2^62). **Persist the `name → id` map in source control** so subsequent updates reuse the same IDs.
-- Data binding / contextualization IDs: UUID v4 (`uuidgen` / `[guid]::NewGuid()` / `python -c "import uuid;print(uuid.uuid4())"`).
+- Data binding / contextualization IDs: UUID v4 (`uuidgen` / `[guid]::NewGuid()`).
 - Avoid reusing an ID for a different concept — IDs are referenced by `displayNamePropertyId`, `entityIdParts`, `propertyBindings[].targetPropertyId`, and `source/target.entityTypeId`.
 
-Preferred generator (Python — cross-platform, high-entropy):
+Preferred generators:
 
 ```bash
-# 64-bit positive integer ID
-python -c "import secrets; print(secrets.randbits(62))"
-# GUID
-python -c "import uuid; print(uuid.uuid4())"
+# Bash — 64-bit positive integer ID (requires $RANDOM or /dev/urandom)
+ID=$(od -An -tu8 -N8 /dev/urandom | tr -d ' ' | head -c 18)
+# Bash — GUID
+GUID=$(uuidgen)
+```
+
+```powershell
+# PowerShell — 64-bit positive integer ID
+$ID = [string]([System.Math]::Abs([System.BitConverter]::ToInt64([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(8), 0)))
+# PowerShell — GUID
+$GUID = [guid]::NewGuid().ToString()
 ```
 
 Avoid shell `RANDOM` — it is 15-bit on most shells and collides quickly across a handful of IDs.
@@ -73,9 +80,20 @@ An empty ontology is created with just `.platform` and an empty `definition.json
 **Guide the LLM to generate:**
 
 1. A `.platform` JSON with `{ "metadata": { "type": "Ontology", "displayName": "<name>" } }`.
-2. An empty `definition.json` of `{}`.
+2. An empty `definition.json` of `{}`. The base64 encoding of `{}` is exactly `e30=` — do not add whitespace, newlines, or BOM.
 3. Base64-encode each, build the envelope, `POST` to `https://api.fabric.microsoft.com/v1/workspaces/{WS_ID}/items`.
 4. Poll the returned `Location` header until `Succeeded`; capture the new ontology item ID.
+
+> **`createItem` returns 202 with no response body** — `az rest` exits with code 0 and prints nothing. This is expected. After the LRO completes, list Ontology items in the workspace to capture the new item's ID:
+>
+> ```bash
+> ONTO_ID=$(az rest --method GET \
+>   --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/items?type=Ontology" \
+>   --resource "https://api.fabric.microsoft.com" \
+>   --query "value[?displayName=='${ONTO_NAME}'] | [0].id" --output tsv)
+> ```
+>
+> To capture the LRO `Location` header from `az rest`, use `--verbose` and parse stderr — see [SKILL.md § LRO Header Capture](../SKILL.md#lro-header-capture-with-az-rest).
 
 Minimal envelope shape:
 
@@ -194,7 +212,7 @@ Timeseries binding (lakehouse):
       "sourceType": "LakehouseTable",
       "workspaceId": "<WS_ID>",
       "itemId": "<LH_ID>",
-      "sourceTableName": "tank_timeseries",
+      "sourceTableName": "zava_aircraft_timeseries",
       "sourceSchema": "dbo"
     }
   }
@@ -220,7 +238,7 @@ Timeseries binding (eventhouse / Kusto):
       "itemId": "<EH_ID>",
       "clusterUri": "<eventhouse-cluster-uri>",
       "databaseName": "<kql-database-name>",
-      "sourceTableName": "tank_timeseries"
+      "sourceTableName": "zava_aircraft_timeseries"
     }
   }
 }
@@ -246,8 +264,8 @@ A relationship type connects two **existing and distinct** entity types. File pa
   "namespace": "usertypes",
   "namespaceType": "Custom",
   "name": "operates",
-  "source": { "entityTypeId": "<site_entity_type_id>" },
-  "target": { "entityTypeId": "<tank_entity_type_id>" }
+  "source": { "entityTypeId": "<hub_entity_type_id>" },
+  "target": { "entityTypeId": "<aircraft_entity_type_id>" }
 }
 ```
 
@@ -270,14 +288,14 @@ A contextualization tells the ontology how rows in a lakehouse table map to rela
     "sourceType": "LakehouseTable",
     "workspaceId": "<WS_ID>",
     "itemId": "<LH_ID>",
-    "sourceTableName": "hub_aircraft_link",
+    "sourceTableName": "zava_hub_aircraft_link",
     "sourceSchema": "dbo"
   },
   "sourceKeyRefBindings": [
-    { "sourceColumnName": "HubId", "targetPropertyId": "<site_key_property_id>" }
+    { "sourceColumnName": "HubId", "targetPropertyId": "<hub_key_property_id>" }
   ],
   "targetKeyRefBindings": [
-    { "sourceColumnName": "TailNumber", "targetPropertyId": "<tank_key_property_id>" }
+    { "sourceColumnName": "TailNumber", "targetPropertyId": "<aircraft_key_property_id>" }
   ]
 }
 ```
@@ -293,6 +311,13 @@ A contextualization tells the ontology how rows in a lakehouse table map to rela
 ## Apply a Definition Update
 
 `updateDefinition` replaces the included parts wholesale. The safe workflow is **fetch → mutate → send**.
+
+> **`getDefinition` typically returns 202 (LRO)**, not 200 with inline data. You must:
+> 1. Capture the `Location` header from the 202 response
+> 2. Poll the operation URL until `status: "Succeeded"`
+> 3. `GET {operation-url}/result` to retrieve the actual definition envelope
+>
+> This two-step pattern applies to both `az rest` (capture via `--verbose`) and `curl` (capture via `-D` headers file). See [definition-script-templates.md](definition-script-templates.md) for complete scripts that handle both 200 and 202.
 
 ```bash
 # 1. Fetch current definition. getDefinition is LRO-capable: it MAY return 200

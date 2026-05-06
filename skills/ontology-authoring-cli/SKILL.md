@@ -1,16 +1,6 @@
 ---
 name: ontology-authoring-cli
-description: >
-  Create and evolve Fabric IQ Ontology (preview) items from CLI — define entity types, properties
-  (including timeseries), relationship types, and bind them to OneLake lakehouse tables
-  (static + timeseries) or Eventhouse / KQL database tables (timeseries only). Uses the Fabric
-  item-definition REST API (Create Item / Update Item Definition) with `InlineBase64` parts.
-  Use when the user wants to create a Fabric Ontology item; add or alter entity types, properties,
-  or keys; add timeseries properties and bindings; bind an entity type to a lakehouse or Eventhouse
-  table; add relationship types and contextualizations; or script ontology deployment from source.
-  Triggers: "create fabric ontology", "add ontology entity type", "bind entity type to lakehouse",
-  "bind entity type to eventhouse", "ontology timeseries binding", "add ontology relationship type",
-  "ontology contextualization", "fabric iq ontology authoring", "update ontology definition"
+description: 'Create and evolve Fabric IQ Ontology (preview) items from CLI — define entity types, properties (including timeseries), relationship types, and bind them to OneLake lakehouse tables (static + timeseries) or Eventhouse / KQL database tables (timeseries only). Uses the Fabric item-definition REST API (Create Item / Update Item Definition) with `InlineBase64` parts. Use when the user wants to create a Fabric Ontology item; add or alter entity types, properties, or keys; add timeseries properties and bindings; bind an entity type to a lakehouse or Eventhouse table; add relationship types and contextualizations; or script ontology deployment from source. Triggers: "create fabric ontology", "add ontology entity type", "bind entity type to lakehouse", "bind entity type to eventhouse", "ontology timeseries binding", "add ontology relationship type", "ontology contextualization", "fabric iq ontology authoring", "update ontology definition"'
 ---
 
 > **Update Check — ONCE PER SESSION (mandatory)**
@@ -30,35 +20,35 @@ description: >
 
 ## Table of Contents
 
-| Task                                            | Reference                                                                                                                    | Notes                                                             |
-| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Finding Workspaces and Items in Fabric          | [COMMON-CLI.md § Finding Workspaces and Items in Fabric](../../common/COMMON-CLI.md#finding-workspaces-and-items-in-fabric)  | **Mandatory** — resolve workspace/item IDs before authoring       |
-| Fabric Topology & Key Concepts                  | [COMMON-CORE.md § Fabric Topology & Key Concepts](../../common/COMMON-CORE.md#fabric-topology--key-concepts)                 | Workspace → Item hierarchy                                        |
-| Authentication & Token Acquisition              | [COMMON-CORE.md § Authentication & Token Acquisition](../../common/COMMON-CORE.md#authentication--token-acquisition)         | Use `https://api.fabric.microsoft.com` audience for control plane |
-| Core Control-Plane REST APIs                    | [COMMON-CORE.md § Core Control-Plane REST APIs](../../common/COMMON-CORE.md#core-control-plane-rest-apis)                    | Create Item, Get/Update Item Definition                           |
-| Long-Running Operations (LRO)                   | [COMMON-CORE.md § Long-Running Operations (LRO)](../../common/COMMON-CORE.md#long-running-operations-lro)                    | Item create/update returns an LRO                                 |
-| Rate Limiting & Throttling                      | [COMMON-CORE.md § Rate Limiting & Throttling](../../common/COMMON-CORE.md#rate-limiting--throttling)                         |                                                                   |
-| Authentication Recipes                          | [COMMON-CLI.md § Authentication Recipes](../../common/COMMON-CLI.md#authentication-recipes)                                  | `az login`; token acquisition                                     |
-| Fabric Control-Plane API via `az rest`          | [COMMON-CLI.md § Fabric Control-Plane API via az rest](../../common/COMMON-CLI.md#fabric-control-plane-api-via-az-rest)      | **Always** pass `--resource https://api.fabric.microsoft.com`     |
-| Long-Running Operations (LRO) Pattern           | [COMMON-CLI.md § Long-Running Operations (LRO) Pattern](../../common/COMMON-CLI.md#long-running-operations-lro-pattern)      | Poll `Location` header until `Succeeded`                          |
-| Gotchas & Troubleshooting (CLI-Specific)        | [COMMON-CLI.md § Gotchas & Troubleshooting (CLI-Specific)](../../common/COMMON-CLI.md#gotchas--troubleshooting-cli-specific) | Token audience, shell escaping                                    |
-| `az rest` Template                              | [COMMON-CLI.md § `az rest` Template](../../common/COMMON-CLI.md#az-rest-template)                                            |                                                                   |
-| Definition Envelope (parts, payloadType)        | [ITEM-DEFINITIONS-CORE.md § Definition Envelope](../../common/ITEM-DEFINITIONS-CORE.md#definition-envelope)                  | `InlineBase64` parts pattern used for Ontology                    |
-| Ontology Definition Reference                   | [ONTOLOGY-AUTHORING-CORE.md § Definition Tree](../../common/ONTOLOGY-AUTHORING-CORE.md#definition-tree)                      | Authoritative file/folder layout for the ontology item            |
-| EntityType & EntityTypeProperty schema          | [ONTOLOGY-AUTHORING-CORE.md § EntityType file](../../common/ONTOLOGY-AUTHORING-CORE.md#entitytype-file--entitytypesiddefinitionjson) | Allowed `valueType` values, key constraints, name regex            |
-| DataBinding schema + source-type mapping        | [ONTOLOGY-AUTHORING-CORE.md § DataBinding file](../../common/ONTOLOGY-AUTHORING-CORE.md#databinding-file--entitytypesiddatabindingsguidjson) | Lakehouse & Eventhouse shapes; value-type mapping; binding rules   |
-| RelationshipType + Contextualization schema     | [ONTOLOGY-AUTHORING-CORE.md § RelationshipType file](../../common/ONTOLOGY-AUTHORING-CORE.md#relationshiptype-file--relationshiptypesiddefinitionjson) | Source/target constraints, link table requirements                 |
-| Ontology Concepts                               | [SKILL.md § Ontology Item Concepts](#ontology-item-concepts)                                                                 | Entity types, properties, bindings, relationship types            |
-| Tool Stack                                      | [SKILL.md § Tool Stack](#tool-stack)                                                                                         |                                                                   |
-| Connection                                      | [SKILL.md § Connection](#connection)                                                                                         | Discover workspace, lakehouse, ontology IDs                       |
-| Authoring Scope                                 | [SKILL.md § Authoring Scope](#authoring-scope)                                                                               | Supported operations at a glance                                  |
-| Authoring Mechanics (full reference)            | [authoring-mechanics.md](references/authoring-mechanics.md)                                                                  | Envelope, IDs, create, entity types, bindings, relationships, update, verify |
-| Worked Examples                                 | [examples.md](references/examples.md)                                                                                        | End-to-end bash recipes (create → bind → relationship → timeseries) |
-| Preview & Confirm (mandatory before LRO write)  | [preview-and-confirm.md](references/preview-and-confirm.md)                                                                  | Mermaid proposal (greenfield) / change-set diff (brownfield)       |
-| Script Templates                                | [definition-script-templates.md](references/definition-script-templates.md)                                                  | Bash / PowerShell / Python fetch-mutate-send scaffolds             |
-| Must / Prefer / Avoid / Troubleshooting         | [SKILL.md § Must / Prefer / Avoid / Troubleshooting](#must--prefer--avoid--troubleshooting)                                  | LLM decision rules                                                 |
-| Agentic Workflows                               | [SKILL.md § Agentic Workflows](#agentic-workflows)                                                                           | Exploration-before-authoring, script generation                    |
-| Agent Integration Notes                         | [SKILL.md § Agent Integration Notes](#agent-integration-notes)                                                               | How this skill composes with agents / other skills                 |
+| Task                                           | Reference                                                                                                                                              | Notes                                                                        |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| Finding Workspaces and Items in Fabric         | [COMMON-CLI.md § Finding Workspaces and Items in Fabric](../../common/COMMON-CLI.md#finding-workspaces-and-items-in-fabric)                            | **Mandatory** — resolve workspace/item IDs before authoring                  |
+| Fabric Topology & Key Concepts                 | [COMMON-CORE.md § Fabric Topology & Key Concepts](../../common/COMMON-CORE.md#fabric-topology--key-concepts)                                           | Workspace → Item hierarchy                                                   |
+| Authentication & Token Acquisition             | [COMMON-CORE.md § Authentication & Token Acquisition](../../common/COMMON-CORE.md#authentication--token-acquisition)                                   | Use `https://api.fabric.microsoft.com` audience for control plane            |
+| Core Control-Plane REST APIs                   | [COMMON-CORE.md § Core Control-Plane REST APIs](../../common/COMMON-CORE.md#core-control-plane-rest-apis)                                              | Create Item, Get/Update Item Definition                                      |
+| Long-Running Operations (LRO)                  | [COMMON-CORE.md § Long-Running Operations (LRO)](../../common/COMMON-CORE.md#long-running-operations-lro)                                              | Item create/update returns an LRO                                            |
+| Rate Limiting & Throttling                     | [COMMON-CORE.md § Rate Limiting & Throttling](../../common/COMMON-CORE.md#rate-limiting--throttling)                                                   |                                                                              |
+| Authentication Recipes                         | [COMMON-CLI.md § Authentication Recipes](../../common/COMMON-CLI.md#authentication-recipes)                                                            | `az login`; token acquisition                                                |
+| Fabric Control-Plane API via `az rest`         | [COMMON-CLI.md § Fabric Control-Plane API via az rest](../../common/COMMON-CLI.md#fabric-control-plane-api-via-az-rest)                                | **Always** pass `--resource https://api.fabric.microsoft.com`                |
+| Long-Running Operations (LRO) Pattern          | [COMMON-CLI.md § Long-Running Operations (LRO) Pattern](../../common/COMMON-CLI.md#long-running-operations-lro-pattern)                                | Poll `Location` header until `Succeeded`                                     |
+| Gotchas & Troubleshooting (CLI-Specific)       | [COMMON-CLI.md § Gotchas & Troubleshooting (CLI-Specific)](../../common/COMMON-CLI.md#gotchas--troubleshooting-cli-specific)                           | Token audience, shell escaping                                               |
+| `az rest` Template                             | [COMMON-CLI.md § `az rest` Template](../../common/COMMON-CLI.md#az-rest-template)                                                                      |                                                                              |
+| Definition Envelope (parts, payloadType)       | [ITEM-DEFINITIONS-CORE.md § Definition Envelope](../../common/ITEM-DEFINITIONS-CORE.md#definition-envelope)                                            | `InlineBase64` parts pattern used for Ontology                               |
+| Ontology Definition Reference                  | [ONTOLOGY-AUTHORING-CORE.md § Definition Tree](../../common/ONTOLOGY-AUTHORING-CORE.md#definition-tree)                                                | Authoritative file/folder layout for the ontology item                       |
+| EntityType & EntityTypeProperty schema         | [ONTOLOGY-AUTHORING-CORE.md § EntityType file](../../common/ONTOLOGY-AUTHORING-CORE.md#entitytype-file--entitytypesiddefinitionjson)                   | Allowed `valueType` values, key constraints, name regex                      |
+| DataBinding schema + source-type mapping       | [ONTOLOGY-AUTHORING-CORE.md § DataBinding file](../../common/ONTOLOGY-AUTHORING-CORE.md#databinding-file--entitytypesiddatabindingsguidjson)           | Lakehouse & Eventhouse shapes; value-type mapping; binding rules             |
+| RelationshipType + Contextualization schema    | [ONTOLOGY-AUTHORING-CORE.md § RelationshipType file](../../common/ONTOLOGY-AUTHORING-CORE.md#relationshiptype-file--relationshiptypesiddefinitionjson) | Source/target constraints, link table requirements                           |
+| Ontology Concepts                              | [SKILL.md § Ontology Item Concepts](#ontology-item-concepts)                                                                                           | Entity types, properties, bindings, relationship types                       |
+| Tool Stack                                     | [SKILL.md § Tool Stack](#tool-stack)                                                                                                                   |                                                                              |
+| Connection                                     | [SKILL.md § Connection](#connection)                                                                                                                   | Discover workspace, lakehouse, ontology IDs                                  |
+| Authoring Scope                                | [SKILL.md § Authoring Scope](#authoring-scope)                                                                                                         | Supported operations at a glance                                             |
+| Authoring Mechanics (full reference)           | [authoring-mechanics.md](references/authoring-mechanics.md)                                                                                            | Envelope, IDs, create, entity types, bindings, relationships, update, verify |
+| Worked Examples                                | [examples.md](references/examples.md)                                                                                                                  | End-to-end bash recipes (create → bind → relationship → timeseries)          |
+| Preview & Confirm (mandatory before LRO write) | [preview-and-confirm.md](references/preview-and-confirm.md)                                                                                            | Mermaid proposal (greenfield) / change-set diff (brownfield)                 |
+| Script Templates                               | [definition-script-templates.md](references/definition-script-templates.md)                                                                            | Bash / PowerShell fetch-mutate-send scaffolds                                |
+| Must / Prefer / Avoid / Troubleshooting        | [SKILL.md § Must / Prefer / Avoid / Troubleshooting](#must--prefer--avoid--troubleshooting)                                                            | LLM decision rules                                                           |
+| Agentic Workflows                              | [SKILL.md § Agentic Workflows](#agentic-workflows)                                                                                                     | Exploration-before-authoring, script generation                              |
+| Agent Integration Notes                        | [SKILL.md § Agent Integration Notes](#agent-integration-notes)                                                                                         | How this skill composes with agents / other skills                           |
 
 ---
 
@@ -84,14 +74,39 @@ Property `valueType` allowed values (exact): `String`, `Boolean`, `DateTime`, `O
 
 ## Tool Stack
 
-| Tool | Purpose | Install |
-|---|---|---|
-| **az cli** | Fabric control-plane calls via `az rest` (Create/Get/Update Item Definition) | `winget install Microsoft.AzureCLI` |
-| **jq** | JSON processing and payload extraction | `winget install jqlang.jq` |
-| **python3** | Generating unique 64-bit IDs, composing envelopes, and reliable base64 on every platform | Pre-installed on most dev boxes |
-| **PowerShell `[Convert]::ToBase64String` / `FromBase64String`** | Base64 on Windows — prefer over `certutil -encode`, which wraps lines and adds header/footer | Built-in |
+| Tool                                                            | Purpose                                                                                      | Install                             |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------- |
+| **az cli**                                                      | Fabric control-plane calls via `az rest` (Create/Get/Update Item Definition)                 | `winget install Microsoft.AzureCLI` |
+| **jq**                                                          | JSON processing and payload extraction                                                       | `winget install jqlang.jq`          |
+| **PowerShell `[Convert]::ToBase64String` / `FromBase64String`** | Base64 on Windows — prefer over `certutil -encode`, which wraps lines and adds header/footer | Built-in                            |
 
-On Windows, prefer PowerShell or Python for base64. Avoid `certutil -encode`: its output is line-wrapped with header/footer and must be post-processed before use as an `InlineBase64` payload.
+### Prerequisite Check
+
+Before authoring, verify that `az` and `jq` are available. On Windows, `winget install` does not update the `PATH` in existing shell sessions — open a new terminal or refresh the path manually after installing.
+
+```bash
+# Bash
+az version >/dev/null 2>&1  || { echo "Install az: https://aka.ms/installazurecli"; exit 1; }
+jq --version >/dev/null 2>&1 || { echo "Install jq: sudo apt install jq  OR  brew install jq"; exit 1; }
+```
+
+```powershell
+# PowerShell
+if (-not (Get-Command az  -ErrorAction SilentlyContinue)) { Write-Error "Install az: winget install Microsoft.AzureCLI"; return }
+if (-not (Get-Command jq  -ErrorAction SilentlyContinue)) { Write-Error "Install jq: winget install jqlang.jq  (then open a new terminal)"; return }
+```
+
+On Windows, prefer PowerShell for base64. Avoid `certutil -encode`: its output is line-wrapped with header/footer and must be post-processed before use as an `InlineBase64` payload.
+
+> **⚠️ PowerShell `ConvertTo-Json` Warning**: PowerShell's `ConvertTo-Json` can silently reorder keys and serialize `$null` differently than JSON `null`, which can cause `ALMOperationImportFailed` errors on `updateDefinition`. To avoid this:
+>
+> 1. **Always use `[System.IO.File]::WriteAllText`** with `[System.Text.UTF8Encoding]::new($false)` to write JSON files — `Out-File` and `Set-Content` add a BOM that corrupts the payload.
+> 2. **Build JSON with `jq`** instead of `ConvertTo-Json` where possible — `jq -nc` produces deterministic, compact JSON without PowerShell serialization quirks:
+>    ```powershell
+>    $json = '{}' | jq -nc --arg id "$ET_ID" --arg name "Site" '{id:$id,name:$name}'
+>    ```
+> 3. **Validate** the JSON before sending: `Get-Content envelope.json | jq .` — if `jq` fails, the payload is malformed.
+> 4. **Use `-Depth 10`** on `ConvertTo-Json` — the default depth of 2 silently truncates nested objects.
 
 ---
 
@@ -104,14 +119,14 @@ Ontology authoring targets the Fabric control plane — not a data-plane endpoin
 az login
 
 # 2. Resolve workspace ID from name
-WS_NAME="My-Archimed-Workspace"
+WS_NAME="Contoso-Analytics"
 WS_ID=$(az rest --method GET \
   --url "https://api.fabric.microsoft.com/v1/workspaces" \
   --resource "https://api.fabric.microsoft.com" \
   | jq -r --arg n "$WS_NAME" '.value[] | select(.displayName==$n) | .id')
 
 # 3. Resolve lakehouse item ID (source for bindings)
-LH_NAME="OntologyDataLH"
+LH_NAME="ZavaAirlinesLH"
 LH_ID=$(az rest --method GET \
   --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/lakehouses" \
   --resource "https://api.fabric.microsoft.com" \
@@ -142,7 +157,7 @@ If the ontology will carry **timeseries bindings against an Eventhouse**, resolv
 # Resolve EH_ID + CLUSTER_URI + DB_NAME from a single /kqlDatabases call.
 # The KQL database record carries parentEventhouseItemId (the Eventhouse item ID
 # the KustoTable binding requires) and properties.queryServiceUri.
-DB_NAME="OntologyTelemetryDB"
+DB_NAME="ZavaTelemetryDB"
 
 KQL_DB=$(az rest --method GET \
   --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/kqlDatabases" \
@@ -168,7 +183,62 @@ echo "EH_ID=${EH_ID}  CLUSTER_URI=${CLUSTER_URI}  DB_NAME=${DB_NAME}"
 
 > Eventhouse tables can back **`TimeSeries` bindings only**. The entity type's static (`NonTimeSeries`) binding must still come from a managed lakehouse table.
 
+> **Eventhouse ID field mapping**: The KQL databases API returns `properties.parentEventhouseItemId` — this is the value you must use as `itemId` in a `KustoTable` data-binding payload. Do not use the KQL database's own `id` field.
+
 See [COMMON-CLI.md § Finding Workspaces and Items in Fabric](../../common/COMMON-CLI.md#finding-workspaces-and-items-in-fabric) for pagination and JMESPath variants.
+
+### Schema Discovery
+
+Before composing bindings, discover the source table schemas so you map the correct column names.
+
+**Lakehouse tables** — use the Fabric Tables REST API:
+
+```bash
+# List tables
+az rest --method GET \
+  --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/lakehouses/${LH_ID}/tables" \
+  --resource "https://api.fabric.microsoft.com"
+
+# For column-level schema, use the SQL endpoint (INFORMATION_SCHEMA) or the
+# OneLake Table API (Iceberg metadata). The Tables API returns table names only.
+```
+
+**Eventhouse / KQL tables** — query the Kusto REST API:
+
+```bash
+TOKEN=$(az account get-access-token --resource "https://kusto.kusto.windows.net" --query accessToken -o tsv)
+curl -s -X POST "${CLUSTER_URI}/v1/rest/query" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"db":"'"$DB_NAME"'","csl":".show table MyTable schema as json"}'
+# Parse the OrderedColumns array from the response to get column names and types.
+```
+
+### LRO Header Capture with `az rest`
+
+`az rest` does not expose response headers by default. Both `createItem` and `updateDefinition` return **202 Accepted** with a `Location` header pointing at the LRO operation URL. Use `--verbose` and parse stderr to capture it:
+
+```bash
+# Bash — capture Location header from az rest --verbose stderr
+LRO_URL=$(az rest --method POST \
+  --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/items" \
+  --resource "https://api.fabric.microsoft.com" \
+  --headers "Content-Type=application/json" \
+  --body @envelope.json --verbose 2>&1 \
+  | grep -oP "(?<='Location': ')[^']+")
+```
+
+```powershell
+# PowerShell — capture Location header from az rest --verbose stderr
+$result = az rest --method POST `
+  --resource "https://api.fabric.microsoft.com" `
+  --url "https://api.fabric.microsoft.com/v1/workspaces/$WS_ID/items" `
+  --headers "Content-Type=application/json" `
+  --body "@envelope.json" --verbose 2>&1
+$lroUrl = ($result | Select-String -Pattern "'Location': '([^']+)'" |
+  ForEach-Object { $_.Matches[0].Groups[1].Value })
+```
+
+> **Important**: `createItem` returns 202 with **no response body** — `az rest` exits with code 0 and prints nothing. This is normal. Always list items after the LRO completes to capture the new item ID.
 
 ---
 
@@ -203,12 +273,31 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 | Relationship types + contextualizations | [authoring-mechanics.md § Add a Relationship Type](references/authoring-mechanics.md#add-a-relationship-type) |
 | Apply a definition update (fetch → mutate → send) | [authoring-mechanics.md § Apply a Definition Update](references/authoring-mechanics.md#apply-a-definition-update) |
 | Verify and inspect | [authoring-mechanics.md § Verify and Inspect](references/authoring-mechanics.md#verify-and-inspect) |
-| Complete Bash / PowerShell / Python scaffolds | [definition-script-templates.md](references/definition-script-templates.md) |
+| Complete Bash / PowerShell scaffolds | [definition-script-templates.md](references/definition-script-templates.md) |
 
 **Core invariants to keep in mind when authoring (full detail in the reference files):**
 
 - Envelope shape: `{ "displayName", "type": "Ontology", "definition": { "parts": [ { "path", "payload", "payloadType": "InlineBase64" } ] } }`; `definition.json` is literally `{}`; `.platform` carries `metadata.type: "Ontology"` + `displayName`.
 - IDs: entity / relationship / property IDs are **positive 64-bit integers**, data binding / contextualization IDs are **GUIDs**. Persist the `name → id` map in source control; never reuse an ID for a different concept.
+
+**ID map template** — persist this alongside your deployment scripts (JSON or YAML):
+
+```json
+{
+  "ontologyName": "SkillTest_Fleet",
+  "entityTypes": {
+    "Site":      { "id": "1048860412765431174", "properties": { "SiteId": "1428056703884423742", "SiteName": "4251708967918658190" } },
+    "Equipment": { "id": "3332700945676096991", "properties": { "EquipmentId": "4585483423451989345" } }
+  },
+  "relationshipTypes": {
+    "EquipmentAtSite": { "id": "4242053467032157032" }
+  },
+  "bindings": {
+    "Site_static":      "25e3a44a-b62a-40e3-a64a-a43caaa92d19",
+    "Equipment_static": "5dc4cadd-3700-4c96-bb1e-41e4c909ae4d"
+  }
+}
+```
 - Bindings: `NonTimeSeries` is **lakehouse-only** and at most one per entity type; a `NonTimeSeries` binding is required **before** any `TimeSeries` binding on the same entity type; `TimeSeries` can be lakehouse or Eventhouse; for `KustoTable`, `itemId` is the **Eventhouse item ID** (not the KQL database ID).
 - Relationships: `source.entityTypeId` and `target.entityTypeId` must be distinct and must reference entity types present in the parts tree.
 - Updates replace the included parts wholesale — **always** fetch the current definition, mutate locally, then send.
@@ -219,7 +308,7 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 
 ### Must
 
-- **Clarify before acting on ambiguous prompts** — never infer schema or bindings. If the user says "create an ontology for refinery data" without naming entity types, their keys, or the lakehouse tables, ask what entities, what keys, and which lakehouse tables. Irreversible side-effects (replacing an ontology definition) require explicit user intent.
+- **Clarify before acting on ambiguous prompts** — never infer schema or bindings. If the user says "create an ontology for airline data" without naming entity types, their keys, or the lakehouse tables, ask what entities, what keys, and which lakehouse tables. Irreversible side-effects (replacing an ontology definition) require explicit user intent.
 - **Resolve `WS_ID` and source item IDs before composing any binding** — hardcoded GUIDs are a top-3 failure mode. Lakehouse bindings need the lakehouse `itemId`; eventhouse bindings need the eventhouse `itemId`, cluster URI, and database name.
 - **Fetch the current definition before any update** — `updateDefinition` replaces included parts wholesale. Merging with stale local state silently drops recent changes. Handle the LRO 202 on `getDefinition` (poll and retrieve via the operation's `result` endpoint).
 - **Persist the `name → id` map** for entity types, relationship types, and properties in source control alongside the skill consumer's repo. Regenerating IDs on every run creates duplicates and breaks references.
@@ -266,8 +355,12 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 | Instances empty after binding | `propertyBindings` column names don't match source columns | Inspect the source schema and fix `sourceColumnName` / `sourceSchema` |
 | New upstream rows not appearing | No refresh performed | Trigger a manual graph-model refresh on the ontology item |
 | Timeseries widget shows no data | `timestampColumnName` not set, or timestamp column is not a supported date/time type | Set `timestampColumnName` in the TimeSeries binding; ensure column type is `datetime` / `date` / `timestamp` |
-| `getDefinition` returns `202` | LRO response, not the envelope | Poll the operation until `Succeeded`, then `GET {operation-location}/result` |
+| `getDefinition` returns `202` | LRO response, not the envelope | Poll the operation until `Succeeded`, then `GET {operation-location}/result` — see [LRO Header Capture](#lro-header-capture-with-az-rest) |
 | `Conflict` on `updateDefinition` | Concurrent edit from the portal | Re-fetch definition, re-apply mutations, resend |
+| `ALMOperationImportFailed` on `updateDefinition` | Malformed JSON payload — often caused by PowerShell `ConvertTo-Json` serialization quirks (`$null` vs `null`, key reordering, BOM in file) | Build JSON with `jq -nc` instead of `ConvertTo-Json`; write files with `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)` to avoid BOM; validate with `jq .` before sending — see [Tool Stack § PowerShell Warning](#tool-stack) |
+| `createItem` returns exit code 0 but no output | Normal — `createItem` returns `202 Accepted` with no body; `az rest` treats this as success | List items after the LRO completes to capture the new item ID; use `--verbose` to capture the `Location` header for LRO polling |
+| `409 ItemDisplayNameAlreadyInUse` on `createItem` | Ontology with the same `displayName` already exists in the workspace | List existing ontologies first; delete or rename the existing one, or choose a different name |
+| `definition.json` payload causes import error | Extra whitespace, BOM, or newlines in the base64 payload | `definition.json` must be exactly `{}` — its base64 is `e30=`. On Windows, ensure no BOM by using `[System.IO.File]::WriteAllText` with `UTF8Encoding($false)` |
 
 ---
 

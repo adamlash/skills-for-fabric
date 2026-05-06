@@ -54,7 +54,7 @@ Pick the tier by **post-update entity count** (so a brownfield update with 4 exi
    🏬 LH dbo.hubs                                      🏬 LH dbo.aircrafts (static)
                                                        ⚡ EH AircraftReadings (TS, ts=ObservedAt)
 
-   🔗 operates  ➜  🏬 LH dbo.hub_aircraft_link
+   🔗 operates  ➜  🏬 LH dbo.zava_hub_aircraft_link
        hub_id       →  Hub.HubId
        tail_number  →  Aircraft.TailNumber
 ```
@@ -87,7 +87,7 @@ Pick the tier by **post-update entity count** (so a brownfield update with 4 exi
    8  Maintenance    🔑 WorkOrderId      5      📈  🏬 dbo.maint_orders    ⚡ MaintEvents
 
 🔗 RELATIONSHIPS (6)
-   Hub        ─[ operates    ]─►  Aircraft        🏬 dbo.hub_aircraft_link
+   Hub        ─[ operates    ]─►  Aircraft        🏬 dbo.zava_hub_aircraft_link
    Aircraft   ─[ flies       ]─►  Flight          🏬 dbo.aircraft_flight_link
    Flight     ─[ departsFrom ]─►  Gate            🏬 dbo.flight_gate_link
    Flight     ─[ staffedBy   ]─►  Crew            🏬 dbo.flight_crew_link

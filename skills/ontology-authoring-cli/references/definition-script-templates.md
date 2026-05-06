@@ -6,7 +6,6 @@ Reference scaffolds for authoring Fabric Ontology items end-to-end from the CLI.
 
 - Bash template — Linux / WSL / macOS with GNU coreutils. On BSD `base64` (stock macOS), swap `base64 -d` → `base64 -D` and replace `base64 -w 0` with `base64 | tr -d '\n'`. Requires `curl`, `jq`, and `az`.
 - PowerShell template — **PowerShell 7+** (pwsh). Relies on `-SkipHttpErrorCheck` and `utf8NoBOM` which are not available in Windows PowerShell 5.1. On 5.1, use the Bash template via WSL or upgrade to PowerShell 7.
-- Python section (§ 4) is a **generator sketch** — it composes an envelope from an in-memory spec. It is **not** a full fetch-mutate-send client. For that flow, use the Bash or PowerShell template above.
 
 ---
 
@@ -58,7 +57,7 @@ jq -r '.definition.parts[] | "\(.path)\t\(.payload)"' "$WORK/current.json" \
 
 # 3. Mutate — drop new/updated JSON files into $WORK/tree/...
 #    e.g. add a new entity type
-#    cp my-new-aircraft.json "$WORK/tree/EntityTypes/8813598896083/definition.json"
+#    cp zava-new-aircraft.json "$WORK/tree/EntityTypes/8813598896083/definition.json"
 
 # 4. Rebuild envelope from $WORK/tree/
 #    Note: base64 -w 0 is GNU-only; on macOS use `base64 | tr -d '\n'`.
@@ -290,37 +289,24 @@ if ($updResp.StatusCode -eq 200) {
 
 ---
 
-## 4. Intent → Envelope Generator (Python sketch)
+## 4. ID Generation Helpers
 
-> **Scope:** this is a **generator sketch only** — given an in-memory spec, it emits the `parts[]` array ready to be POSTed. It does **not** fetch the current definition, handle the `getDefinition` / `updateDefinition` LROs, or send the envelope. For a full fetch-mutate-send client, use the Bash (§ 1) or PowerShell (§ 2) template above.
+Generating unique 64-bit integer IDs and GUIDs without external dependencies:
 
-```python
-# Given a simple YAML/JSON spec of entity types, properties, relationships, and bindings,
-# emit the parts[] array ready for Create/Update Item Definition.
-# Persist id_map.json alongside the spec so entity/property IDs remain stable across runs.
-
-import base64, json, uuid
-
-def b64(s: str) -> str:
-    return base64.b64encode(s.encode("utf-8")).decode("ascii")
-
-def part(path: str, obj) -> dict:
-    return {"path": path, "payload": b64(json.dumps(obj)), "payloadType": "InlineBase64"}
-
-def envelope(parts, display_name):
-    return {
-        "displayName": display_name,
-        "type": "Ontology",
-        "definition": {"parts": [part(".platform",
-                        {"metadata": {"type": "Ontology", "displayName": display_name}})] +
-                       [part("definition.json", {})] + parts}
-    }
+```bash
+# Bash — 64-bit positive integer ID (from /dev/urandom)
+ID=$(od -An -tu8 -N8 /dev/urandom | tr -d ' ' | head -c 18)
+# Bash — GUID
+GUID=$(uuidgen)
 ```
 
-Keep the generator deterministic: every entity/property/relationship gets an ID from `id_map.json`; new concepts append a freshly generated positive 64-bit integer, existing concepts reuse the stored ID. Prefer `secrets.randbits(62)` for the 64-bit integer IDs — avoid shell `RANDOM`, which is 15-bit and collides quickly. Data binding and contextualization IDs can be regenerated with `uuid.uuid4()`.
-
-```python
-import secrets, uuid
-entity_or_property_id = str(secrets.randbits(62))  # positive 64-bit int
-binding_guid = str(uuid.uuid4())
+```powershell
+# PowerShell — 64-bit positive integer ID (cryptographic random)
+$bytes = [byte[]]::new(8)
+[System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$ID = [string]([System.Math]::Abs([System.BitConverter]::ToInt64($bytes, 0)))
+# PowerShell — GUID
+$GUID = [guid]::NewGuid().ToString()
 ```
+
+Keep the generator deterministic: every entity/property/relationship gets an ID from `id_map.json`; new concepts append a freshly generated positive 64-bit integer, existing concepts reuse the stored ID. Avoid shell `$RANDOM`, which is 15-bit and collides quickly. Data binding and contextualization IDs (GUIDs) can be regenerated on each run since they are not cross-referenced.
