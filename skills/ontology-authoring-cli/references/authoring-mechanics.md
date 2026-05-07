@@ -10,6 +10,8 @@ For base64 encode/decode across GNU vs BSD, and for the full fetch-mutate-send s
 
 The envelope is the same as any other Fabric item definition — a `definition` object with a `parts[]` array. Each part has `path`, `payload` (base64-encoded file contents), and `payloadType` (use `InlineBase64`).
 
+> **Part paths must always use forward slashes** (`EntityTypes/{id}/definition.json`), never backslashes. On Windows, avoid `Join-Path` or `\` operators for building part paths — use string interpolation with `/` instead. Backslashes cause `ALMOperationBadRequest`.
+
 ```json
 {
   "displayName": "zava_airlines_ontology",

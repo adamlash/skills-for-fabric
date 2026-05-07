@@ -8,33 +8,42 @@ End-to-end worked examples composing the operations documented in [authoring-mec
 
 ## Schema Discovery Recipes
 
-Before composing bindings, discover the source table schemas to avoid hallucinating column names.
+Before composing bindings, discover the source table schemas to avoid hallucinating column names. **Prefer companion skills** for speed — they return all schemas in a single call.
 
 ### Lakehouse table columns
 
+```sql
+-- FASTEST: Use the sqldw-consumption-cli skill to query the lakehouse SQL endpoint
+-- This returns ALL tables and columns in one query:
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'dbo'
+ORDER BY TABLE_NAME, ORDINAL_POSITION
+```
+
 ```bash
-# Option 1: Fabric Tables API (table names only — no columns)
+# Alternative: Fabric Tables API (table names only — no columns)
 az rest --method GET \
   --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/lakehouses/${LH_ID}/tables" \
   --resource "https://api.fabric.microsoft.com"
 
-# Option 2: OneLake Table API (Iceberg metadata — full column schema)
+# Alternative: OneLake Table API (Iceberg metadata — full column schema, one table at a time)
 # Use the Fabric MCP tool `fabric-onelake_get_table` with namespace="dbo" and table="<name>"
-# to retrieve Iceberg metadata including column names and types.
-
-# Option 3: SQL endpoint INFORMATION_SCHEMA (requires lakehouse SQL connection)
-# SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
-# WHERE TABLE_NAME = 'SiteCatalog' AND TABLE_SCHEMA = 'dbo'
 ```
 
 ### Eventhouse / KQL table columns
 
 ```bash
 TOKEN=$(az account get-access-token --resource "https://kusto.kusto.windows.net" --query accessToken -o tsv)
-# .show table <name> schema as json → parse OrderedColumns for column names and CslType
+
+# FASTEST: get ALL table schemas in the database in one call
 curl -s -X POST "${CLUSTER_URI}/v1/rest/query" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"db":"'"$DB_NAME"'","csl":".show table EquipmentTelemetry schema as json"}'
+  -d '{"db":"'"$DB_NAME"'","csl":".show database schema as json"}'
+
+# Alternative: single table schema
+# -d '{"db":"'"$DB_NAME"'","csl":".show table EquipmentTelemetry schema as json"}'
+
 # Map CslType → ontology valueType:
 #   string → String | datetime → DateTime | real/double → Double | long → BigInt | bool → Boolean
 ```

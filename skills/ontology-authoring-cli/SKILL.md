@@ -70,6 +70,12 @@ A Fabric Ontology item is authored as a **tree of JSON files** inside the item d
 
 Property `valueType` allowed values (exact): `String`, `Boolean`, `DateTime`, `Object`, `BigInt`, `Double`. Use `BigInt` — **not** `Int64` — for integers; there is no `Guid` value type (model GUIDs as `String`). Timeseries bindings require a timestamp column (source type `datetime` / `date` / `timestamp`) and a `TimeSeries` binding with `timestampColumnName`. See [ONTOLOGY-AUTHORING-CORE.md § EntityTypeProperty](../../common/ONTOLOGY-AUTHORING-CORE.md#entitytypeproperty) for the full source-column → `valueType` mapping.
 
+> **⚠️ Property names must be unique across both `properties[]` and `timeseriesProperties[]`** within a single entity type. If a lakehouse table and an Eventhouse table both contain a column with the same name (e.g., `tenant_id`), you **must** rename one of the ontology property names to avoid a collision. The `sourceColumnName` in the binding can still point to the original column — only the ontology property `name` must be unique. For example, keep the static property as `TenantId` and name the timeseries one `TsTenantId`.
+>
+> **⚠️ Property names with the same `name` across different entity types must share the same `valueType`** — the ontology enforces name-level type consistency across the entire definition. If `SerialNum` is `String` on one entity type, it cannot be `BigInt` on another. Either use the same `valueType` everywhere, or disambiguate with a prefix (e.g., `SerialNumStr` vs `SerialNumInt`).
+>
+> **⚠️ Part paths must always use forward slashes** (`EntityTypes/{id}/definition.json`), never backslashes. On Windows, PowerShell path-joining operators (`Join-Path`, `\`) produce backslashes that the Fabric API rejects with `ALMOperationBadRequest`. Always build part paths with string interpolation using `/`.
+
 ---
 
 ## Tool Stack
@@ -189,28 +195,30 @@ See [COMMON-CLI.md § Finding Workspaces and Items in Fabric](../../common/COMMO
 
 ### Schema Discovery
 
-Before composing bindings, discover the source table schemas so you map the correct column names.
+Before composing bindings, discover the source table schemas so you map the correct column names. **Use companion skills for schema discovery** — they are faster and more reliable than raw REST calls.
 
-**Lakehouse tables** — use the Fabric Tables REST API:
+**Lakehouse tables** — route to the `sqldw-consumption-cli` skill to query the SQL endpoint:
 
-```bash
-# List tables
-az rest --method GET \
-  --url "https://api.fabric.microsoft.com/v1/workspaces/${WS_ID}/lakehouses/${LH_ID}/tables" \
-  --resource "https://api.fabric.microsoft.com"
-
-# For column-level schema, use the SQL endpoint (INFORMATION_SCHEMA) or the
-# OneLake Table API (Iceberg metadata). The Tables API returns table names only.
+```sql
+-- Run via sqldw-consumption-cli against the lakehouse SQL endpoint
+SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = 'dbo'
+ORDER BY TABLE_NAME, ORDINAL_POSITION
 ```
 
-**Eventhouse / KQL tables** — query the Kusto REST API:
+This returns all tables and columns in a single query. If the `sqldw-consumption-cli` skill is not available, fall back to the Fabric Tables REST API (table names only) plus the OneLake Table API (Iceberg metadata for column schemas).
+
+**Eventhouse / KQL tables** — route to the `eventhouse-consumption-cli` skill, or query the Kusto REST API directly:
 
 ```bash
+# Preferred: get ALL table schemas in one call (not per-table)
 TOKEN=$(az account get-access-token --resource "https://kusto.kusto.windows.net" --query accessToken -o tsv)
 curl -s -X POST "${CLUSTER_URI}/v1/rest/query" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"db":"'"$DB_NAME"'","csl":".show table MyTable schema as json"}'
-# Parse the OrderedColumns array from the response to get column names and types.
+  -d '{"db":"'"$DB_NAME"'","csl":".show database schema as json"}'
+# Returns every table + column in the database in a single response.
+# For a single table: .show table <name> schema as json
 ```
 
 ### LRO Header Capture with `az rest`
@@ -314,7 +322,9 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 - **Persist the `name → id` map** for entity types, relationship types, and properties in source control alongside the skill consumer's repo. Regenerating IDs on every run creates duplicates and breaks references.
 - **Add the static (`NonTimeSeries`) binding before any timeseries binding** on an entity type — each entity type supports at most one static binding, and timeseries binding requires the static key property to already be populated.
 - **Bind only to managed lakehouse tables** — external tables, lakehouses with OneLake security enabled, and delta tables with column mapping enabled are not supported.
+- **Ensure property names are unique across `properties[]` and `timeseriesProperties[]`** within each entity type. When a lakehouse table and an Eventhouse table share a column name (e.g., `tenant_id`, `device_id`), rename the ontology timeseries property (e.g., `TsTenantId`) while keeping `sourceColumnName` pointing at the original column. Duplicate property names cause `ALMOperationImportFailed`.
 - **Restrict entity keys (`entityIdParts`) to properties whose `valueType` is `String` or `BigInt`** — other value types cannot be used as keys.
+- **Use forward slashes in all part paths** — `EntityTypes/{id}/definition.json`, never `EntityTypes\{id}\definition.json`. On Windows, `Join-Path` and `\` produce backslashes that the Fabric API rejects. Build paths with string interpolation: `"EntityTypes/$ET_ID/definition.json"`.
 - **Verify permissions** — authoring requires at least `Contributor` on the workspace.
 - **Treat the item type as `Ontology`** (not `OntologyPreview` or similar) in both the envelope's `type` and the `.platform` metadata.
 - **Render a Preview & Confirm gate before every LRO write** — render a Mermaid proposal (greenfield) or a change-set diff vs. `getDefinition` (brownfield) and obtain explicit `yes` from the user before calling `createItem` or `updateDefinition`. See [preview-and-confirm.md](references/preview-and-confirm.md). Anything other than `yes` means stop and revise; never partially apply.
@@ -330,6 +340,7 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 
 ### Avoid
 
+- **Generating monolithic `.ps1` or `.sh` script files** — execute commands directly in the shell. Large generated scripts introduce escaping bugs, PowerShell parse errors, and are hard to debug when a single line fails. Build JSON with `jq -nc`, write to a temp file, and pass to `az rest --body @file`.
 - **Hand-editing base64 payloads** — always decode, edit the JSON, then re-encode.
 - **Reusing a property/entity/relationship ID** for a different concept.
 - **Relying on relationship-name uniqueness outside the ontology scope** — today, relationship names appear to be unique within an ontology (observed behavior); collect the full set of desired relationship names up front so you can disambiguate with prefixes if needed. Confirm naming collisions with the consumer rather than guessing.
@@ -358,6 +369,9 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 | `getDefinition` returns `202` | LRO response, not the envelope | Poll the operation until `Succeeded`, then `GET {operation-location}/result` — see [LRO Header Capture](#lro-header-capture-with-az-rest) |
 | `Conflict` on `updateDefinition` | Concurrent edit from the portal | Re-fetch definition, re-apply mutations, resend |
 | `ALMOperationImportFailed` on `updateDefinition` | Malformed JSON payload — often caused by PowerShell `ConvertTo-Json` serialization quirks (`$null` vs `null`, key reordering, BOM in file) | Build JSON with `jq -nc` instead of `ConvertTo-Json`; write files with `[System.IO.File]::WriteAllText` + `UTF8Encoding($false)` to avoid BOM; validate with `jq .` before sending — see [Tool Stack § PowerShell Warning](#tool-stack) |
+| `ALMOperationImportFailed` on `createItem` or `updateDefinition` — duplicate property name | A property name appears in both `properties[]` and `timeseriesProperties[]` on the same entity type | Property names must be unique across both arrays. If a lakehouse and Eventhouse table share a column name, rename the timeseries ontology property (e.g., `TenantId` → `TsTenantId`) — the binding's `sourceColumnName` can still reference the original column |
+| `ALMOperationImportFailed` — "Property 'X' has conflicting value types" | The same property `name` appears on two different entity types with different `valueType` values (e.g., `String` on one, `BigInt` on another) | Property names are unique across the entire ontology — if two entity types share a property name, both must use the same `valueType`. Disambiguate with a prefix (e.g., `SerialNumStr` vs `SerialNumInt`) or unify the type |
+| `ALMOperationBadRequest` — "directory name … is not valid for EntityType" | Part `path` uses backslashes (`EntityTypes\\{id}\\definition.json`) instead of forward slashes | Always use forward slashes in part paths: `EntityTypes/{id}/definition.json`. On Windows, avoid `Join-Path` or `\` for part paths — use string interpolation with `/` |
 | `createItem` returns exit code 0 but no output | Normal — `createItem` returns `202 Accepted` with no body; `az rest` treats this as success | List items after the LRO completes to capture the new item ID; use `--verbose` to capture the `Location` header for LRO polling |
 | `409 ItemDisplayNameAlreadyInUse` on `createItem` | Ontology with the same `displayName` already exists in the workspace | List existing ontologies first; delete or rename the existing one, or choose a different name |
 | `definition.json` payload causes import error | Extra whitespace, BOM, or newlines in the base64 payload | `definition.json` must be exactly `{}` — its base64 is `e30=`. On Windows, ensure no BOM by using `[System.IO.File]::WriteAllText` with `UTF8Encoding($false)` |
@@ -366,7 +380,56 @@ Full JSON shapes, field contracts, and verification recipes for each operation l
 
 ## Agentic Workflows
 
+> **⚠️ Do NOT generate monolithic `.ps1` / `.sh` script files.** Execute each step directly in the shell as individual commands. Generating a large script file introduces escaping bugs, parse errors, and property-access issues that are hard to debug. Instead:
+> - Run `az rest`, `jq`, and PowerShell commands **directly** in the terminal
+> - Build JSON payloads incrementally using `jq -nc` piped through variables
+> - Write the final envelope to a temp file, then pass it to `az rest --body @file`
+> - If a step fails, fix it and re-run — don't regenerate the entire script
+
 ### Exploration Before Authoring
+
+> **Greenfield vs brownfield execution strategy:**
+>
+> - **Greenfield (new ontology)**: Build the **complete** definition — entity types, bindings, relationships, contextualizations, timeseries — as a single `createItem` call with all parts in one envelope. This is faster and avoids intermediate states. The `createItem` payload accepts the full `definition.parts[]` array, not just `.platform` + `definition.json`.
+> - **Brownfield (updating existing)**: Execute **incrementally** — fetch the current definition, mutate, send. Verify with `getDefinition` after each `updateDefinition` to catch errors early. A failure partway through preserves prior progress.
+
+#### Parallel Schema Discovery
+
+When the ontology binds to **multiple data sources** (lakehouse tables + Eventhouse tables), discover schemas in parallel rather than sequentially. Launch separate discovery tasks that run concurrently:
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  ORCHESTRATOR (this skill)                                       │
+│                                                                   │
+│  Step 0 → Resolve workspace, folder, lakehouse ID, eventhouse ID │
+│                                                                   │
+│  Step 1 → Fan out schema discovery (parallel):                   │
+│     ┌──────────────────────────┐  ┌────────────────────────────┐ │
+│     │ TASK A: Lakehouse schemas │  │ TASK B: Eventhouse schemas │ │
+│     │ sqldw-consumption-cli     │  │ eventhouse-consumption-cli │ │
+│     │ or INFORMATION_SCHEMA     │  │ or .show database schema   │ │
+│     │ → all tables + columns    │  │ → all tables + columns     │ │
+│     └──────────┬───────────────┘  └──────────┬─────────────────┘ │
+│                │                              │                   │
+│  Step 2 → Merge schemas ◄────────────────────┘                   │
+│     - Match entity tables (lakehouse) to telemetry (eventhouse)  │
+│     - Detect property name collisions across sources             │
+│     - Detect property type conflicts across entity types         │
+│     - Rename collisions (e.g., TenantId → TsTenantId)           │
+│                                                                   │
+│  Step 3 → Propose model → PREVIEW & CONFIRM                     │
+│                                                                   │
+│  Step 4 → Build full envelope → createItem (single call)         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**How to fan out** (agent-specific):
+- **GitHub Copilot CLI / Claude Code**: launch two background `task` agents — one for lakehouse (`sqldw-consumption-cli` or `INFORMATION_SCHEMA.COLUMNS` query), one for Eventhouse (`.show database schema as json`). Read both results when they complete.
+- **Single-threaded environments**: run the two discovery queries sequentially — each is a single call, so the overhead is minimal.
+
+The merge step (Step 2) is where most authoring bugs are caught — deduplicate property names, unify `valueType` across entities, and prefix timeseries properties that collide with static ones.
+
+#### Detailed Step Flow
 
 ```text
 Step 0 → Is the request specific? Are the entity types, keys, and lakehouse tables named?
@@ -374,25 +437,28 @@ Step 0 → Is the request specific? Are the entity types, keys, and lakehouse ta
                   Any timeseries properties? Any relationships and their link tables?"
                   STOP — do not proceed until the user answers.
          → YES → Continue.
-Step 1 → List workspaces → resolve WS_ID                               [COMMON-CLI.md]
-Step 2 → List lakehouses in WS → resolve LH_ID and source schemas
-Step 3 → If ontology exists: getDefinition → decode parts              (capture current IDs)
-         Else: plan `createItem` with `.platform` + empty `definition.json`.
-Step 4 → For each entity type:
+Step 1 → Resolve IDs: workspace, folder, lakehouse, eventhouse     [COMMON-CLI.md]
+Step 2 → Discover source schemas (parallel where possible):
+           a. Lakehouse: invoke `sqldw-consumption-cli` or query INFORMATION_SCHEMA.COLUMNS
+           b. Eventhouse: invoke `eventhouse-consumption-cli` or run `.show database schema as json`
+Step 3 → Merge schemas: detect property name collisions + type conflicts; rename as needed
+Step 4 → If ontology exists: getDefinition → decode parts              (capture current IDs)
+         Else: plan `createItem` with the FULL definition (all parts in one call).
+Step 5 → For each entity type:
            a. Generate/reuse 64-bit IDs for entity + properties
            b. Build EntityTypes/{id}/definition.json
            c. Build one or two DataBindings/{guid}.json files
-Step 5 → For each relationship:
-           a. Confirm both entity types exist in Step 4 output
+Step 6 → For each relationship:
+           a. Confirm both entity types exist in Step 5 output
            b. Generate/reuse relationship type ID
            c. Build RelationshipTypes/{id}/definition.json
            d. Build RelationshipTypes/{id}/Contextualizations/{guid}.json
-Step 6 → Base64-encode all parts; assemble envelope
-Step 7 → **PREVIEW & CONFIRM** — render proposal (greenfield) or change-set diff (brownfield)
+Step 7 → Base64-encode all parts; assemble envelope
+Step 8 → **PREVIEW & CONFIRM** — render proposal (greenfield) or change-set diff (brownfield)
          and obtain explicit `yes` from the user. See [preview-and-confirm.md](references/preview-and-confirm.md).
          Do not proceed on anything other than `yes`.
-Step 8 → createItem OR updateDefinition (LRO)
-Step 9 → Poll LRO until Succeeded; getDefinition; verify IDs and bindings; persist post-write snapshot for next-run diff
+Step 9 → createItem OR updateDefinition (LRO)
+Step 10 → Poll LRO until Succeeded; getDefinition; verify IDs and bindings; persist post-write snapshot for next-run diff
 ```
 
 ### Script Generation Workflow
@@ -420,5 +486,10 @@ End-to-end worked examples (create empty ontology → add entity type + non-time
 ## Agent Integration Notes
 
 - This skill is authoring-focused. Pair with a consumption skill (e.g., a Fabric Graph query skill) to validate the ontology end-to-end.
+- **Parallelize schema discovery** when the ontology binds to multiple source types:
+  - Launch a background `sqldw-consumption-cli` task for lakehouse schemas (`INFORMATION_SCHEMA.COLUMNS`) — returns all tables + columns in one query.
+  - Launch a background `eventhouse-consumption-cli` task for Eventhouse schemas (`.show database schema as json`) — returns all tables + columns in one call.
+  - Both run concurrently. Merge results when both complete, then build the ontology model.
+- **Merge step is critical** — after discovery, deduplicate property names across `properties[]` and `timeseriesProperties[]`, unify `valueType` for same-named properties across entity types, and prefix collisions before building the envelope.
 - When orchestrating multi-step customer workstreams that span Ontology + Eventhouse + Lakehouse, route via an agent (e.g., `FabricDataEngineer`) rather than chaining skills directly.
 - Reasonable upstream dependencies to assume: lakehouse tables already exist and have the key columns the user described. If not, the caller should invoke a lakehouse authoring skill first.
